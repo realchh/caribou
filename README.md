@@ -38,7 +38,7 @@ See the [Testing](TESTING.md) guide.
 
 ## Benchmarks
 
-See the [Benchmarks](benchmarks/README.md) guide.
+See the [Benchmarks](aws_benchmarks/README.md) guide.
 
 ## Troubleshooting
 

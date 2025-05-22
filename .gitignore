@@ -90,10 +90,10 @@ plotting/plots/*.png
 testing
 testing.py
 
-# Solver benchmarks dag image files
-benchmarks/solver_benchmarks/images/
+# Solver aws_benchmarks dag image files
+aws_benchmarks/solver_benchmarks/images/
 
 # Benchmark results
-benchmarks/solver_benchmarks/results/
+aws_benchmarks/solver_benchmarks/results/
 
 Dockerfile

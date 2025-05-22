@@ -11,7 +11,7 @@ This tool allows you to find the Electricity Maps zone for a set of coordinates 
 
 ---
 ## Disclaimer
-This code is modified from https://github.com/electricitymaps/zone-finder to use python
+This code is modified from https://github.com/electricitymaps/zone-finder for our use.
 
 ---
 
