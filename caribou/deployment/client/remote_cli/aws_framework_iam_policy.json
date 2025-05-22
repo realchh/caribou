@@ -37,7 +37,9 @@
           "lambda:GetFunction",
           "lambda:ListFunctions",
           "lamda:UpdateFunctionCode",
-          "lambda:AddPermission"
+          "lambda:AddPermission",
+          "lambda:RemovePermission",
+          "lambda:GetPolicy"
         ],
         "Resource": "*",
         "Effect": "Allow"
