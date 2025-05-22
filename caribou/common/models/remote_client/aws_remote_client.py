@@ -1050,10 +1050,9 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         # Copy Python dependency management files
         COPY pyproject.toml poetry.lock ./
-        COPY README.md ./ 
+        RUN touch README.md 
         
         COPY caribou ./caribou
-        COPY caribou-go ./caribou-go
         
         # Configure Poetry settings and install dependencies
         RUN poetry config virtualenvs.create false
