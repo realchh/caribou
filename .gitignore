@@ -91,9 +91,9 @@ testing
 testing.py
 
 # Solver aws_benchmarks dag image files
-aws_benchmarks/solver_benchmarks/images/
+benchmarks/aws_benchmarks/solver_benchmarks/images/
 
 # Benchmark results
-aws_benchmarks/solver_benchmarks/results/
+benchmarks/aws_benchmarks/solver_benchmarks/results/
 
 Dockerfile

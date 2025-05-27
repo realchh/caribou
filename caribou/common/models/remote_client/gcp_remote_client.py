@@ -1,3 +1,4 @@
+# TODO: implement automatic deployment to GCP
 import json
 import logging
 import os
@@ -8,8 +9,19 @@ import zipfile
 from datetime import datetime
 from typing import Any, Optional
 
-from boto3.session import Session
-from botocore.exceptions import ClientError
+# from boto3.session import Session
+from google.cloud import storage
+from google.cloud import pubsub_v1
+from google.cloud import run_v2 # For Cloud Run (underlies 2nd Gen Functions)
+from google.cloud import firestore # Or datastore if you prefer
+from google.cloud import logging_v2
+from google.cloud import iam_admin_v1 # For managing IAM custom roles, service accounts
+from google.cloud import artifactregistry_v1
+from google.cloud import scheduler_v1
+from google.oauth2 import service_account # For explicit credentials if needed
+from google.auth import default as google_auth_default
+from google.api_core import exceptions as google_api_exceptions
+from google.api_core.client_options import ClientOptions
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
@@ -29,22 +41,20 @@ logger = logging.getLogger(__name__)
 
 
 # pylint: disable=too-many-lines
-class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
-    LAMBDA_CREATE_ATTEMPTS = 30
+class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
+    FUNCTION_CREATE_ATTEMPTS = 30
     DELAY_TIME = 5
 
-    def __init__(self, region: str) -> None:
-        self._session = Session(region_name=region)
-        self._client_cache: dict[str, Any] = {}
-        self._workflow_image_cache: dict[str, dict[str, str]] = {}
-
+    def __init__(self, project_id: str | None = None, region: str | None = None, credentials_path: str | None = None) -> None:
+        self._credentials = None
+        if credentials_path:
+            self._credentials = service_account.Credentials.from_service_account_file(credentials_path)
         # Allow for override of the deployment resources bucket (Due to S3 bucket name restrictions)
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
         )
-
     def get_current_provider_region(self) -> str:
-        return f"aws_{self._session.region_name}"
+        return f"gcp_{self._session.region_name}"
 
     def _client(self, service_name: str) -> Any:
         if service_name not in self._client_cache:
@@ -567,7 +577,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def _wait_for_role_to_become_active(self, role_name: str) -> None:
         client = self._client("iam")
-        for _ in range(self.LAMBDA_CREATE_ATTEMPTS):
+        for _ in range(self.FUNCTION_CREATE_ATTEMPTS):
             response = client.get_role(RoleName=role_name)
             state = response["Role"]["State"]
             if state == "Active":
@@ -608,7 +618,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def _wait_for_function_to_become_active(self, function_name: str) -> None:
         client = self._client("lambda")
-        for _ in range(self.LAMBDA_CREATE_ATTEMPTS):
+        for _ in range(self.FUNCTION_CREATE_ATTEMPTS):
             response = client.get_function(FunctionName=function_name)
             state = response["Configuration"]["State"]
             if state == "Active":

@@ -30,7 +30,7 @@ regions_and_providers:
       region: "northamerica-northeast1"
   disallowed_regions:
   providers:
-    aws:
+    gcp:
       config:
         timeout: 300
         memory: 1024

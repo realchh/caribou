@@ -16,7 +16,7 @@ from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.deploy.deployment_packager import DeploymentPackager
 from caribou.deployment.common.deploy.models.resource import Resource
 
-
+# TODO: make a wrapper so that GCP can be added
 def remove_remote_framework() -> None:
     print("Removing Remote framework")
     aws_remote_client = AWSRemoteClient(GLOBAL_SYSTEM_REGION)
