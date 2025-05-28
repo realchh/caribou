@@ -1355,6 +1355,27 @@ google-auth = ">=1.25.0,<3.0dev"
 grpc = ["grpcio (>=1.38.0,<2.0dev)", "grpcio-status (>=1.38.0,<2.0.dev0)"]
 
 [[package]]
+name = "google-cloud-eventarc"
+version = "1.15.2"
+description = "Google Cloud Eventarc API client library"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "google_cloud_eventarc-1.15.2-py3-none-any.whl", hash = "sha256:c12e97fc72af2958e79493e51ee1f60b1b66640ffa6744d054504354b6446e61"},
+    {file = "google_cloud_eventarc-1.15.2.tar.gz", hash = "sha256:5b8dabfcbdc04bacc71e4176ba7538f936255ed3b723e9aa0cbb38b6f9123526"},
+]
+
+[package.dependencies]
+google-api-core = {version = ">=1.34.1,<2.0.dev0 || >=2.11.dev0,<3.0.0", extras = ["grpc"]}
+google-auth = ">=2.14.1,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0"
+grpc-google-iam-v1 = ">=0.14.0,<1.0.0"
+proto-plus = [
+    {version = ">=1.25.0,<2.0.0", markers = "python_version >= \"3.13\""},
+    {version = ">=1.22.3,<2.0.0", markers = "python_version < \"3.13\""},
+]
+protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
+
+[[package]]
 name = "google-cloud-firestore"
 version = "2.20.2"
 description = "Google Cloud Firestore API client library"
@@ -5351,4 +5372,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "f73ba801e397a7da1556c96b5d83d9ecc2b8e186a25757c4ec829908315c7e3e"
+content-hash = "690b83737b912d562fab9412326cf44264bfccee117a440910bf565c3a894d03"
