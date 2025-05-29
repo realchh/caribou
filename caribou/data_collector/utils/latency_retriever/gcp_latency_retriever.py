@@ -1,15 +1,14 @@
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import google.auth
-import numpy as np
 from google.cloud import monitoring_v3
-from scipy import optimize, stats
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
 
-from caribou.data_collector.utils.constants import DEFAULT_LATENCY_VALUE, GCP_GLOBAL_ZONE_PAIR_RTT_METRIC
+from caribou.data_collector.utils.constants import GCP_GLOBAL_ZONE_PAIR_RTT_METRIC
 from caribou.data_collector.utils.latency_retriever.latency_retriever import LatencyRetriever
-
+import numpy as np
+import google.auth
+from scipy import optimize, stats
 
 class GCPLatencyRetriever(LatencyRetriever):
     _percentile_information: dict[str, Any] | None = None
@@ -18,7 +17,7 @@ class GCPLatencyRetriever(LatencyRetriever):
         """Extracts region from a zone name (e.g., 'us-central1-a' -> 'us-central1')."""
         if zone_name == "unknown_zone" or not zone_name:
             return "unknown_region"
-        parts = zone_name.split("-")
+        parts = zone_name.split('-')
         if len(parts) >= 2:
             return f"{parts[0]}-{parts[1]}"
         return zone_name
@@ -45,8 +44,11 @@ class GCPLatencyRetriever(LatencyRetriever):
         filter_str = f'metric.type = "{GCP_GLOBAL_ZONE_PAIR_RTT_METRIC}"'
 
         interval = monitoring_v3.types.TimeInterval()
-        interval.start_time = start_time
-        interval.end_time = end_time
+        interval.start_time=start_time
+        interval.end_time=end_time
+
+        print(f"Querying metric: {GCP_GLOBAL_ZONE_PAIR_RTT_METRIC}")
+        print(f"Time window: {start_time.isoformat()}Z to {end_time.isoformat()}Z")
 
         results = client.list_time_series(
             request={
@@ -69,20 +71,20 @@ class GCPLatencyRetriever(LatencyRetriever):
             source_region = self._get_region_from_zone(source_zone)
             dest_region = self._get_region_from_zone(dest_zone)
 
-            if source_region == "unknown_region" or dest_region == "unknown_region":
+            if source_region == "unknown_region" or dest_region == "unknown_region" or source_region == dest_region:
                 continue
 
             if series.points:
                 point = series.points[0]
                 latency_ns = point.value.double_value
-                latency_ms = latency_ns / 1000000
+                latency_ms = latency_ns/1000000
 
                 zone_pair_key = tuple((source_zone, dest_zone))
                 if zone_pair_key not in processed_zone_pairs:
                     region_pair_latencies_raw[(source_region, dest_region)].append(latency_ms)
                     processed_zone_pairs.add(zone_pair_key)
 
-        aggregated_region_latency_dict: defaultdict[str, dict[str, Any]] = defaultdict(dict[str, Any])
+        aggregated_region_latency_dict = defaultdict(dict[str, Any])
         for (src_reg, dst_reg), latencies in region_pair_latencies_raw.items():
             if dst_reg not in aggregated_region_latency_dict[src_reg]:
                 aggregated_region_latency_dict[src_reg][dst_reg] = {}
@@ -90,34 +92,43 @@ class GCPLatencyRetriever(LatencyRetriever):
 
         return dict(aggregated_region_latency_dict)
 
+
     def get_latency_distribution(self, region_from: dict[str, Any], region_to: dict[str, Any]) -> list[float]:
-        _, project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        _, project_id = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
         # Retrieve _percentile_information if not already retrieved
         if not self._percentile_information:
-            # This url returns a table with the latency between all GCP regions
+            # This url returns a table with the latency between all AWS regions
             self._percentile_information = self._get_latency_information(project_id)
 
         region_from_code = region_from["code"]
         if region_from["code"] not in self._percentile_information:
             region_from_code = region_from_code[:-1] + "1"
+        if region_from_code in ["me-central-1", "il-central-1"]:
+            region_from_code = "me-south-1"
+        if region_from_code == "ca-west-1":
+            region_from_code = "us-west-2"
 
         if region_from_code not in self._percentile_information:
-            print("Error parsing percentile information, origin region not found: ", region_from_code)
-            return [DEFAULT_LATENCY_VALUE]
+            return [150, 150, 150, 150, 150, 150, 150]
 
         region_to_code = region_to["code"]
         if region_to["code"] not in self._percentile_information[region_from_code]:
-            print(f"Error getting latency: destination {region_to_code} not found in origin  {region_from_code}.")
             region_to_code = region_to_code[:-1] + "1"
+        if region_to_code in ["me-central-1", "il-central-1"]:
+            region_to_code = "me-south-1"
+        if region_to_code == "ca-west-1":
+            region_to_code = "us-west-2"
 
         if region_to_code not in self._percentile_information[region_from_code]:
-            return [DEFAULT_LATENCY_VALUE]
+            return [150, 150, 150, 150, 150, 150, 150]
 
         latency_information = self._percentile_information[region_from_code][region_to_code]
 
         log_percentiles = np.log(list(latency_information.values()))
 
-        percentile_ranks = np.array([50]) / 100.0
+        percentile_ranks = np.array([10, 25, 50, 75, 90, 98, 99]) / 100.0
 
         def objective_function(params: list[float], log_percentiles: np.ndarray, percentile_ranks: np.ndarray) -> float:
             mu, sigma = params
@@ -142,3 +153,10 @@ class GCPLatencyRetriever(LatencyRetriever):
         samples = samples / 1000.0  # Convert to seconds
 
         return samples.tolist()
+
+if __name__ == "__main__":
+    _, project_id = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    latency_retriever = GCPLatencyRetriever()
+    latency_retriever._get_latency_information(project_id)
