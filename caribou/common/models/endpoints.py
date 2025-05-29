@@ -10,6 +10,7 @@ from caribou.common.utils import str_to_bool
 
 class Endpoints:  # pylint: disable=too-many-instance-attributes
     def __init__(self) -> None:
+        # TODO: allow GCP provider
         provider = Provider.AWS.value
         global_system_region = GLOBAL_SYSTEM_REGION
 

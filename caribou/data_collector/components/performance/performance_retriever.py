@@ -8,7 +8,7 @@ from caribou.data_collector.utils.latency_retriever.integration_test_latency_ret
     IntegrationTestLatencyRetriever,
 )
 
-
+# TODO: GCP Latency Retriever
 class PerformanceRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:
         super().__init__(client)
@@ -36,6 +36,8 @@ class PerformanceRetriever(DataRetriever):
                 "relative_performance": 1,
                 "transmission_latency": transmission_latency_dict,
             }
+
+        print("result: \n", result_dict)
         return result_dict
 
     def _get_latency_distribution(self, region_from: dict[str, Any], region_to: dict[str, Any]) -> list[float]:

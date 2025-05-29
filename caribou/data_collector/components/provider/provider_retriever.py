@@ -14,7 +14,7 @@ from caribou.common.utils import str_to_bool
 from caribou.data_collector.components.data_retriever import DataRetriever
 from caribou.data_collector.utils.constants import AMAZON_REGION_URL
 
-
+# TODO: get GCP regions
 class ProviderRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:
         super().__init__(client)
@@ -74,6 +74,50 @@ class ProviderRetriever(DataRetriever):
         return enabled_regions
 
     def retrieve_aws_regions(self) -> dict[str, dict[str, Any]]:
+        # First we get a list of enabled regions for the current account
+        all_enabled_regions = self._retrieve_enabled_aws_regions()
+
+        # Then we get the list of all regions from the AWS regions page
+        # To get the location of the regions (Based on location name)
+        amazon_region_page = requests.get(AMAZON_REGION_URL, timeout=5)
+
+        amazon_region_page_soup = BeautifulSoup(amazon_region_page.content, "html.parser")
+
+        regions = {}
+
+        tables = amazon_region_page_soup.find_all("table")
+
+        if len(tables) == 0:
+            raise ValueError("Could not find any tables on the AWS regions page")
+
+        # Process the first table (which is the regions table)
+        table = tables[0]
+        table_rows = table.find_all("tr")[1:]  # Skip header row
+
+        for table_row in table_rows:
+            table_cells = table_row.find_all("td")
+            if len(table_cells) < 2:  # We only need first two columns (Code and Name)
+                continue
+
+            region_code = table_cells[0].text.strip()
+            region_name = table_cells[1].text.strip()
+
+            if region_code not in all_enabled_regions:
+                # Skip regions that are not enabled for the current account
+                continue
+
+            coordinates = self.retrieve_location(region_name)
+            regions[f"{Provider.AWS.value}:{region_code}"] = {
+                "name": region_name,
+                "provider": Provider.AWS.value,
+                "code": region_code,
+                "latitude": coordinates[0],
+                "longitude": coordinates[1],
+            }
+            self._aws_region_name_to_code[region_name] = region_code
+        return regions
+
+    def retrieve_gcp_regions(self) -> dict[str, dict[str, Any]]:
         # First we get a list of enabled regions for the current account
         all_enabled_regions = self._retrieve_enabled_aws_regions()
 
@@ -187,6 +231,7 @@ class ProviderRetriever(DataRetriever):
 
         ecr_cost_dict = self._retrieve_aws_ecr_cost(aws_regions)
 
+        # data obtained from https://www.cloudcarbonfootprint.org/docs/methodology/#gcp-1
         return {
             region_key: {
                 "execution_cost": execution_cost_dict[region_key],
@@ -194,14 +239,42 @@ class ProviderRetriever(DataRetriever):
                 "sns_cost": sns_cost_dict[region_key],
                 "dynamodb_cost": dynamodb_cost_dict[region_key],
                 "ecr_cost": ecr_cost_dict[region_key],
-                "pue": 1.11,
+                "pue": 1.135,
                 "cfe": 0.0,
-                "average_memory_power": 0.0003725,
+                "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.0035,
                 "min_cpu_power_kWh": 0.00074,
                 "available_architectures": self._retrieve_aws_available_architectures(execution_cost_dict[region_key]),
             }
             for region_key in aws_regions
+        }
+
+    def _retrieve_provider_data_gcp(self, gcp_regions: list[str]) -> dict[str, Any]:
+        transmission_cost_dict = self._retrieve_aws_transmission_cost(gcp_regions)
+
+        execution_cost_dict = self._retrieve_aws_execution_cost(gcp_regions)
+
+        sns_cost_dict = self._retrieve_aws_sns_cost(gcp_regions)
+
+        dynamodb_cost_dict = self._retrieve_aws_dynamodb_cost(gcp_regions)
+
+        ecr_cost_dict = self._retrieve_aws_ecr_cost(gcp_regions)
+
+        return {
+            region_key: {
+                "execution_cost": execution_cost_dict[region_key],
+                "transmission_cost": transmission_cost_dict[region_key],
+                "sns_cost": sns_cost_dict[region_key],
+                "dynamodb_cost": dynamodb_cost_dict[region_key],
+                "ecr_cost": ecr_cost_dict[region_key],
+                "pue": 1.1,
+                "cfe": 0.0,
+                "average_memory_power": 0.000392,
+                "max_cpu_power_kWh": 0.00426,
+                "min_cpu_power_kWh": 0.00071,
+                "available_architectures": self._retrieve_aws_available_architectures(execution_cost_dict[region_key]),
+            }
+            for region_key in gcp_regions
         }
 
     def _retrieve_provider_data_integrationtest(self, regions: list[str]) -> dict[str, Any]:
@@ -564,6 +637,60 @@ class ProviderRetriever(DataRetriever):
 
         return result_transmission_cost_dict
 
+    def _retrieve_gcp_transmission_cost(self, available_region: list[str]) -> dict[str, Any]:
+        result_transmission_cost_dict = {}
+
+        exact_region_codes = {
+            "ap-east-1": (0.12, 0.09),
+            "ap-south-2": (0.1093, 0.086),
+            "ap-southeast-3": (0.132, 0.10),
+            "ap-southeast-4": (0.114, 0.10),
+            "ap-south-1": (0.1093, 0.086),
+            "ap-northeast-3": (0.114, 0.09),
+            "ap-northeast-2": (0.126, 0.08),
+            "ap-southeast-1": (0.12, 0.09),
+            "ap-southeast-2": (0.114, 0.098),
+            "ap-northeast-1": (0.114, 0.09),
+            "me-south-1": (0.117, 0.1105),
+            "me-central-1": (0.11, 0.085),
+            "sa-east-1": (0.15, 0.138),
+        }
+
+        for region_key in available_region:
+            if ":" not in region_key:
+                raise ValueError(f"Invalid region key {region_key}")
+
+            region_code = region_key.split(":")[1]
+
+            # Check if the region code is in the dictionary
+            if region_code in exact_region_codes:
+                global_data_transfer, provider_data_transfer = exact_region_codes[region_code]
+            elif region_code.startswith("us-"):
+                global_data_transfer = 0.09
+                provider_data_transfer = 0.02
+            elif region_code.startswith("af-"):
+                global_data_transfer = 0.154
+                provider_data_transfer = 0.147
+            elif region_code.startswith("ca-"):
+                global_data_transfer = 0.09
+                provider_data_transfer = 0.02
+            elif region_code.startswith("eu-"):
+                global_data_transfer = 0.09
+                provider_data_transfer = 0.02
+            elif region_code.startswith("il-"):
+                global_data_transfer = 0.11
+                provider_data_transfer = 0.08
+            else:
+                raise ValueError(f"Unknown region code {region_code}")
+
+            result_transmission_cost_dict[region_key] = {
+                "global_data_transfer": global_data_transfer,
+                "provider_data_transfer": provider_data_transfer,
+                "unit": "USD/GB",
+            }
+
+        return result_transmission_cost_dict
+
     def _retrieve_aws_execution_cost(self, available_region: list[str]) -> dict[str, Any]:
         execution_cost_response = self._aws_pricing_client.list_price_lists(
             ServiceCode="AWSLambda", EffectiveDate=datetime.datetime.now(GLOBAL_TIME_ZONE), CurrencyCode="USD"
@@ -674,6 +801,50 @@ class ProviderRetriever(DataRetriever):
         raise ValueError(f"Could not find compute cost for {current_invocations} invocations")
 
     def get_aws_product_skus(self, price_list_file_json: dict) -> tuple[str, str, str, str, str, str]:
+        """
+        Returns the product UIDs for the invocation and duration of a Lambda function
+
+        architecture: "x86_64" or "arm64"
+        price_list: price list from the AWS Pricing API
+        """
+        invocation_call_sku_arm64 = ""
+        invocation_duration_sku_arm64 = ""
+        invocation_call_sku_x86_64 = ""
+        invocation_duration_sku_x86_64 = ""
+        invocation_call_free_tier_sku = ""
+        invocation_duration_free_tier_sku = ""
+
+        for product in price_list_file_json["products"].values():
+            if (
+                product["attributes"]["group"] == "AWS-Lambda-Requests-ARM"
+                and product["attributes"]["location"] != "Any"
+            ):
+                invocation_call_sku_arm64 = product["sku"]
+            if (
+                product["attributes"]["group"] == "AWS-Lambda-Duration-ARM"
+                and product["attributes"]["location"] != "Any"
+            ):
+                invocation_duration_sku_arm64 = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Requests" and product["attributes"]["location"] != "Any":
+                invocation_call_sku_x86_64 = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Duration" and product["attributes"]["location"] != "Any":
+                invocation_duration_sku_x86_64 = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Requests" and product["attributes"]["location"] == "Any":
+                invocation_call_free_tier_sku = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Duration" and product["attributes"]["location"] == "Any":
+                invocation_duration_free_tier_sku = product["sku"]
+
+        return (
+            invocation_call_sku_arm64,
+            invocation_duration_sku_arm64,
+            invocation_call_sku_x86_64,
+            invocation_duration_sku_x86_64,
+            invocation_call_free_tier_sku,
+            invocation_duration_free_tier_sku,
+        )
+
+    # TODO: Get GCP SKUs
+    def get_gcp_product_skus(self, price_list_file_json: dict) -> tuple[str, str, str, str, str, str]:
         """
         Returns the product UIDs for the invocation and duration of a Lambda function
 

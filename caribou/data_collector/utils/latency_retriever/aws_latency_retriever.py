@@ -30,6 +30,7 @@ class AWSLatencyRetriever(LatencyRetriever):
                             percentile_information[from_region][to_region] = {}
                         percentile_information[from_region][to_region][percentile] = latency
 
+        # print("latency list: \n", percentile_information)
         return percentile_information
 
     def get_latency_distribution(self, region_from: dict[str, Any], region_to: dict[str, Any]) -> list[float]:

@@ -10,18 +10,25 @@ from datetime import datetime
 from typing import Any, Optional
 
 # from boto3.session import Session
-from google.cloud import storage
-from google.cloud import pubsub_v1
-from google.cloud import run_v2 # For Cloud Run (underlies 2nd Gen Functions)
-from google.cloud import firestore # Or datastore if you prefer
-from google.cloud import logging_v2
-from google.cloud import iam_admin_v1 # For managing IAM custom roles, service accounts
-from google.cloud import artifactregistry_v1
-from google.cloud import scheduler_v1
-from google.oauth2 import service_account # For explicit credentials if needed
+
+from google.cloud import (
+    storage,
+    pubsub_v1,
+    run_v2,
+    firestore,
+    logging_v2,
+    iam_admin_v1,
+    artifactregistry_v1,
+    scheduler_v1,
+    eventarc_v1
+)
+from google.oauth2 import service_account
 from google.auth import default as google_auth_default
 from google.api_core import exceptions as google_api_exceptions
 from google.api_core.client_options import ClientOptions
+from google.iam.v1 import iam_policy_pb2, policy_pb2
+from google.cloud.iam_admin_v1 import IAMClient, types as iam_admin_types
+from google.protobuf.json_format import MessageToDict
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
@@ -46,60 +53,150 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     DELAY_TIME = 5
 
     def __init__(self, project_id: str | None = None, region: str | None = None, credentials_path: str | None = None) -> None:
-        self._credentials = None
         if credentials_path:
-            self._credentials = service_account.Credentials.from_service_account_file(credentials_path)
+            self._credentials = service_account.Credentials.from_service_account_file(
+                credentials_path,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            default_project_id = self._credentials.project_id
+        else:
+            self._credentials, default_project_id = google_auth_default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+
+        self._project_id = project_id or default_project_id
+        if not self._project_id:
+            raise ValueError("GCP Project ID not found.")
+
+        self._region = region
+        if not self._region:
+            raise ValueError("GCP region must be provided.")
+
+        client_options = ClientOptions(api_endpoint=f"{self._region}-run.googleapis.com") if self._region else None
+        self._run_client = run_v2.ServicesClient(credentials=self._credentials, client_options=client_options)
+        self._storage_client = storage.Client(project=self._project_id, credentials=self._credentials)
+        self._firestore_client = firestore.Client(credentials=self._credentials)
+        self._pubsub_publisher_client = pubsub_v1.PublisherClient(credentials=self._credentials)
+        self._eventarc_client = eventarc_v1.EventarcClient(credentials=self._credentials)
+        self._artifact_registry_client = artifactregistry_v1.ArtifactRegistryClient(credentials=self._credentials)
+        self._iam_admin_client = IAMClient(credentials=self._credentials)
+
+        self._client_cache: dict[str, Any] = {}
+        self._workflow_image_cache: dict[str, dict[str, str]] = {}
         # Allow for override of the deployment resources bucket (Due to S3 bucket name restrictions)
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
         )
+
     def get_current_provider_region(self) -> str:
-        return f"gcp_{self._session.region_name}"
+        return f"gcp_{self._region}"
 
-    def _client(self, service_name: str) -> Any:
-        if service_name not in self._client_cache:
-            self._client_cache[service_name] = self._session.client(service_name)
-        return self._client_cache[service_name]
+    # no longer needed
+    # def _client(self, service_name: str) -> Any:
+    #     if service_name not in self._client_cache:
+    #         self._client_cache[service_name] = self._session.client(service_name)
+    #     return self._client_cache[service_name]
 
-    def get_iam_role(self, role_name: str) -> str:
-        client = self._client("iam")
-        response = client.get_role(RoleName=role_name)
-        return response["Role"]["Arn"]
+    def get_service_account(self, role_name: str) -> str:
+        full_account_name = f"projects/{self._project_id}/serviceAccounts/{role_name}"
 
-    def get_lambda_function(self, function_name: str) -> dict[str, Any]:
-        client = self._client("lambda")
-        response = client.get_function(FunctionName=function_name)
-        return response["Configuration"]
+        service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
+        return service_account_object["email"]
+
+    def get_cloud_run_service(self, service_name: str) -> dict[str, Any] | None:
+        """
+        Retrieves a Cloud Run service and formats its configuration as a dictionary
+        that closely mirrors the original AWS Lambda configuration structure.
+        """
+        service_object = self.get_cloud_run_service_object(service_name)
+        if not service_object:
+            return None
+
+        # The MessageToDict function converts the protobuf object into a Python dict.
+        # This gives us a raw, complete dictionary representation of the service.
+        service_dict = MessageToDict(service_object._pb)
+
+        # Now, let's format this raw dictionary into the desired structure.
+        return self._format_service_dict(service_dict)
+
+    def _format_service_dict(self, service_dict: dict) -> dict[str, Any]:
+        """
+        A helper method to translate a Cloud Run service dictionary into a format
+        that resembles the AWS Lambda Configuration dictionary.
+        """
+        # Get the container configuration, defaulting to an empty dict if not present
+        container = service_dict.get("template", {}).get("containers", [{}])[0]
+        template = service_dict.get("template", {})
+
+        # Extract environment variables into a simple {key: value} dict
+        env_vars = {
+            env["name"]: env.get("value", "")
+            for env in container.get("env", [])
+        }
+
+        # The formatted dictionary
+        formatted_config = {
+            # GCP Equivalent Fields
+            "ServiceName": service_dict.get("name", "").split("/")[-1],
+            "ServiceArn": service_dict.get("name"),  # The full resource name is the closest to an ARN
+            "ServiceUri": service_dict.get("uri"),
+            "ImageUri": container.get("image"),
+            "Role": template.get("serviceAccount"),
+            "MemorySize": container.get("resources", {}).get("limits", {}).get("memory"),
+            "CpuLimit": container.get("resources", {}).get("limits", {}).get("cpu"),
+            "Timeout": template.get("timeout"),
+            "Environment": {"Variables": env_vars},
+            "LastModified": service_dict.get("updateTime"),
+            "CreateTime": service_dict.get("createTime"),
+            "Scaling": {
+                "MinInstances": template.get("scaling", {}).get("minInstanceCount"),
+                "MaxInstances": template.get("scaling", {}).get("maxInstanceCount"),
+            },
+            # Original AWS keys for reference (commented out or set to None)
+            # "FunctionName": service_dict.get("name", "").split("/")[-1],
+            # "FunctionArn": service_dict.get("name"),
+            # "Runtime": None, # Not applicable for containers
+            # "Handler": None, # Not applicable for containers
+        }
+        return formatted_config
+
+    # The original method that returns the object itself is still useful
+    def get_cloud_run_service_object(self, service_name: str) -> run_v2.Service | None:
+        """
+        Retrieves a Cloud Run service by its name.
+        Returns the Service object or None if not found.
+        """
+        full_service_name = self._run_client.service_path(
+            project=self._project_id, location=self._region, service=service_name
+        )
+        try:
+            request = run_v2.GetServiceRequest(name=full_service_name)
+            service_object = self._run_client.get_service(request=request)
+            return service_object
+        except google_api_exceptions.NotFound:
+            return None
 
     def resource_exists(self, resource: Resource) -> bool:
-        if resource.resource_type == "iam_role":
-            return self.iam_role_exists(resource)
-        if resource.resource_type == "function":
-            return self.lambda_function_exists(resource)
-        if resource.resource_type == "ecr_repository":
-            return self.ecr_repository_exists(resource)
-        if resource.resource_type == "messaging_topic":
+        if resource.resource_type == "service_account":
+            return self.service_account_exists(resource)
+        if resource.resource_type == "cloud_run_service":
+            return self.cloud_run_service_exists(resource)
+        if resource.resource_type == "artifact_registry_repository":
+            return self.artifact_registry_repository_exists(resource)
+        if resource.resource_type == "pubsub_topic":
             return False
         raise RuntimeError(f"Unknown resource type {resource.resource_type}")
 
-    def iam_role_exists(self, resource: Resource) -> bool:
-        try:
-            role = self.get_iam_role(resource.name)
-        except ClientError:
-            return False
-        return role is not None
+    def service_account_exists(self, resource: Resource) -> bool:
+        return self.get_service_account(resource.name) is not None
 
-    def lambda_function_exists(self, resource: Resource) -> bool:
-        try:
-            function = self.get_lambda_function(resource.name)
-        except ClientError:
-            return False
-        return function is not None
+    def cloud_run_service_exists(self, resource: Resource) -> bool:
+        return self.get_cloud_run_service(resource.name) is not None
 
     def set_predecessor_reached(
         self, predecessor_name: str, sync_node_name: str, workflow_instance_id: str, direct_call: bool
     ) -> tuple[list[bool], float, float]:
-        client = self._client("dynamodb")
+        client = self._firestore_client
 
         # Calculate the expiration time for the sync node
         expiration_time = int(time.time()) + SYNC_TABLE_TTL
@@ -606,10 +703,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except ClientError:
             client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust_policy))
         try:
-            return self.get_iam_role(role_name)
+            return self.get_service_account(role_name)
         except ClientError:
             self._wait_for_role_to_become_active(role_name)
-            return self.get_iam_role(role_name)
+            return self.get_service_account(role_name)
 
     def _create_lambda_function(self, kwargs: dict[str, Any]) -> tuple[str, str]:
         client = self._client("lambda")
@@ -961,21 +1058,24 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 f"Could not upload resource {key} to S3, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
             ) from e
 
-    def remove_ecr_repository(self, repository_name: str) -> None:
+    def remove_artifact_registry_repository(self, repository_name: str) -> None:
         repository_name = repository_name.lower()
-        client = self._client("ecr")
-        client.delete_repository(repositoryName=repository_name, force=True)
+        full_repo_name = self._artifact_registry_client.repository_path(
+            project=self._project_id, location=self._region, repository=repository_name
+        )
+        self._artifact_registry_client.delete_repository(name=full_repo_name)
 
-    def ecr_repository_exists(self, resource: Resource) -> bool:
+    def artifact_registry_repository_exists(self, resource: Resource) -> bool:
         repository_name = resource.name.lower()
-        client = self._client("ecr")
+        full_repo_name = self._artifact_registry_client.repository_path(
+            project=self._project_id, location=self._region, repository=repository_name
+        )
 
         try:
-            response = client.describe_repositories(repositoryNames=[repository_name])
-        except ClientError:
+            self._artifact_registry_client.get_repository(name=full_repo_name)
+            return True
+        except google_api_exceptions.NotFound:
             return False
-
-        return response["repositories"] is not None and len(response["repositories"]) > 0
 
     def deploy_remote_cli(
         self,
@@ -1183,7 +1283,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             )
 
         # Get the ARN of the Lambda function
-        lambda_arn = self.get_lambda_function(lambda_function_name)["FunctionArn"]
+        lambda_arn = self.get_cloud_run_service(lambda_function_name)["FunctionArn"]
 
         # Attach the Lambda function to the rule
         events_client.put_targets(

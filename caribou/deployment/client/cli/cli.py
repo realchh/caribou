@@ -38,7 +38,7 @@ from caribou.syncers.log_syncer import LogSyncer
 # Define constants
 AVAILABLE_CLI_FUNCTIONS = get_all_available_timed_cli_functions()
 
-
+# TODO: add function to deploy to GCP, deploy GCP remote cli (after everything else is sorted)
 # Helper function to execute a command on the remote framework
 def _execute_remote_command(
     action: str,
