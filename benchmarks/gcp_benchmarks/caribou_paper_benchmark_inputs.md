@@ -3,7 +3,7 @@ The following are the sources or instructions to acquire similar input data to r
 Due to potential copyright concerns, we do not directly upload the input data used in the publication.
 
 ## DNA Visualization (Paper benchmark)
-Associated S3 bucket name: `caribou-dna-visualization`
+Associated google cloud storage bucket name: `caribou-dna-visualization`
 
 Similar input data: <https://www.ncbi.nlm.nih.gov/genbank/>
 
@@ -19,7 +19,7 @@ Note: For the large input, we could not locate the exact version of the nucleoti
 Additional params: None
 
 ## RAG Data Ingestion (Paper benchmark)
-Associated S3 bucket name: `caribou-document-embedding-benchmark`
+Associated google cloud storage bucket name: `caribou-document-embedding-benchmark`
 
 Similar input data: Most PDF documents are acceptable inputs.
 
@@ -34,7 +34,7 @@ Note: This benchmark requires many other dependencies to run correctly. Please f
 Additional params: `"user_id": "auto_gen_random_id"` ***Make sure to use a different user_ID for every run if you are running this for benchmark purposes!!!***
 
 ## Image Processing (Paper benchmark)
-Associated S3 bucket name: `caribou-image-processing-benchmark`
+Associated google cloud storage bucket name: `caribou-image-processing-benchmark`
 
 Similar input data: Most image files are acceptable inputs.
 
@@ -50,7 +50,7 @@ As a result, most image files will produce similar results to those presented in
 Additional params: `"desired_transformations": ["flip", "rotate", "blur", "greyscale", "resize"]`
 
 ## Text2Speech Censoring (Paper benchmark)
-Associated S3 bucket name: `caribou-text-2-speech-censoring`
+Associated google cloud storage bucket name: `caribou-text-2-speech-censoring`
 
 Similar input data: Use the `yelp_academic_dataset_review.json` from <https://www.kaggle.com/datasets/yelp-dataset/yelp-dataset>
 
@@ -63,7 +63,7 @@ Place the respective text input file in the `input` folder of the S3 bucket.
 Additional Params: None
 
 ## Video Analytics (Paper benchmark)
-Associated S3 bucket name: `caribou-video-analytics`
+Associated google cloud storage bucket name: `caribou-video-analytics`
 
 Similar input data: Any video file from <https://www.ino.ca/en/technologies/video-analytics-dataset/> converted to mp4.
 

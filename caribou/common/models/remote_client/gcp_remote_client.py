@@ -91,12 +91,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def get_current_provider_region(self) -> str:
         return f"gcp_{self._region}"
 
-    # no longer needed
-    # def _client(self, service_name: str) -> Any:
-    #     if service_name not in self._client_cache:
-    #         self._client_cache[service_name] = self._session.client(service_name)
-    #     return self._client_cache[service_name]
-
     def get_service_account(self, role_name: str) -> str:
         full_account_name = f"projects/{self._project_id}/serviceAccounts/{role_name}"
 
@@ -193,6 +187,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def cloud_run_service_exists(self, resource: Resource) -> bool:
         return self.get_cloud_run_service(resource.name) is not None
 
+    # TODO: Check the functionality and modify this
     def set_predecessor_reached(
         self, predecessor_name: str, sync_node_name: str, workflow_instance_id: str, direct_call: bool
     ) -> tuple[list[bool], float, float]:
@@ -256,6 +251,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             consumed_write_capacity,
         )
 
+    # TODO: move this from dynamodb to firestore
     def create_sync_tables(self) -> None:
         # Check if table exists
         client = self._client("dynamodb")
@@ -276,6 +272,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         # Setup TTL for the sync tables
         self._setup_ttl_for_sync_tables()
 
+    # TODO: move this from dynamodb to firestore
     def _setup_ttl_for_sync_tables(self) -> None:
         # Now also enable the expiration of items in the table
         client = self._client("dynamodb")
@@ -294,6 +291,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     TimeToLiveSpecification={"Enabled": True, "AttributeName": SYNC_TABLE_TTL_ATTRIBUTE_NAME},
                 )
 
+    # TODO: move this from dynamodb to firestore
     def upload_predecessor_data_at_sync_node(
         self, function_name: str, workflow_instance_id: str, message: str
     ) -> float:
@@ -320,6 +318,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return response.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
 
+    # TODO: move this from dynamodb to firestore
     def get_predecessor_data(
         self,
         current_instance_name: str,
@@ -349,6 +348,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return [], consumed_read_capacity
 
+    # TODO: i think this does not need much change
     def create_function(
         self,
         function_name: str,
@@ -406,6 +406,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return arn
 
+    # TODO: deploy to artifact registry
     def _copy_image_to_region(self, deployed_image_uri: str) -> str:
         parts = deployed_image_uri.split("/")
         original_region = parts[0].split(".")[3]
@@ -474,6 +475,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 logger.error("Failed to copy Docker image %s. Error: %s", new_image_uri, e)
             return new_image_uri
 
+    # TODO: move from dynamodb to firestore, logic does not need much changes
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
         workflow_instance_id = "-".join(function_name.split("-")[0:2])
 
@@ -503,6 +505,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             ExpressionAttributeValues={":value": {"S": image_name}},
         )
 
+    # TODO: move from dynamodb to firestore, logic does not need much changes
     def _get_deployed_image_uri(self, function_name: str, consistent_read: bool = True) -> str:
         workflow_instance_id = "-".join(function_name.split("-")[0:2])
 
@@ -532,6 +535,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return item["value"]["M"].get(function_name_simple, {}).get("S", "")
         return ""
 
+    # TODO: change from aws lambda insights to cloud run insights or whatever it is called
     def _generate_dockerfile(self, runtime: str, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
         run_command = ""
         if additional_docker_commands and len(additional_docker_commands) > 0:
@@ -559,6 +563,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         CMD ["{handler}"]
         """
 
+    # TODO: nothing to be changed i think
     def _build_docker_image(self, context_path: str, image_name: str) -> None:
         try:
             subprocess.run(["docker", "build", "--platform", "linux/amd64", "-t", image_name, context_path], check=True)
@@ -567,6 +572,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             # This will catch errors from the subprocess and logger.info a message.
             logger.error("Failed to build Docker image %s. Error: %s", image_name, e)
 
+    # TODO: change this to deploy to artifact registry
     def _upload_image_to_ecr(self, image_name: str) -> str:
         ecr_client = self._client("ecr")
         # Assume AWS CLI is configured. Customize these commands based on your AWS setup.
@@ -723,6 +729,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             time.sleep(self.DELAY_TIME)
         raise RuntimeError(f"Lambda function {function_name} did not become active")
 
+    # TODO: Create pubsub topic
     def create_sns_topic(self, topic_name: str) -> str:
         client = self._client("sns")
         # If topic exists, the following will return the existing topic
@@ -730,6 +737,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         # See: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/create_topic.html
         return response["TopicArn"]
 
+    # TODO: create pubsub subscription
     def subscribe_sns_topic(self, topic_arn: str, protocol: str, endpoint: str) -> None:
         client = self._client("sns")
         response = client.subscribe(
@@ -740,6 +748,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         )
         return response["SubscriptionArn"]
 
+    # TODO: remove and add permission for cloud run functions to pubsub
     def add_lambda_permission_for_sns_topic(self, topic_arn: str, lambda_function_arn: str) -> None:
         client = self._client("lambda")
         try:
@@ -755,10 +764,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             SourceArn=topic_arn,
         )
 
+    # TODO: send message to pubsub topic
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
         client = self._client("sns")
         client.publish(TopicArn=identifier, Message=message)
 
+    # TODO: set firestore table value
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._client("dynamodb")
 
@@ -767,6 +778,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         else:
             client.put_item(TableName=table_name, Item={"key": {"S": key}, "value": {"S": value}})
 
+    # TODO: update firestore table value
     def update_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._client("dynamodb")
         expression_attribute_values: dict[str, Any]
@@ -854,6 +866,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         response = client.get_item(TableName=table_name, Key={"key": {"S": key}}, ConsistentRead=consistent_read)
         return "Item" in response
 
+    # TODO: upload resource to google cloud storage
     def upload_resource(self, key: str, resource: bytes) -> None:
         client = self._client("s3")
         try:
@@ -863,6 +876,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 f"Could not upload resource {key} to S3, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
             ) from e
 
+    # TODO: download resource from google cloud storage
     def download_resource(self, key: str) -> bytes:
         client = self._client("s3")
         try:
@@ -873,6 +887,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             ) from e
         return response["Body"].read()
 
+    # TODO: get firestore table keys
     def get_keys(self, table_name: str) -> list[str]:
         client = self._client("dynamodb")
         response = client.scan(TableName=table_name)
@@ -883,6 +898,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return [item["key"]["S"] for item in items]
         return []
 
+    # TODO: logging using monitoring v3
     def get_logs_since(self, function_instance: str, since: datetime) -> list[str]:
         time_ms_since_epoch = int(time.mktime(since.timetuple())) * 1000
         client = self._client("logs")
@@ -914,6 +930,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return log_events
 
+    # TODO: logging using monitoring v3
     def get_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
         time_ms_start = int(start.timestamp() * 1000)
         time_ms_end = int(end.timestamp() * 1000)
@@ -947,6 +964,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return log_events
 
+    # TODO: logging using monitoring v3
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
         time_ms_start = int(start.timestamp() * 1000)
         time_ms_end = int(end.timestamp() * 1000)
@@ -984,6 +1002,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return log_events
 
+    # TODO: move to firestore
     def remove_key(self, table_name: str, key: str) -> None:
         client = self._client("dynamodb")
 
@@ -996,12 +1015,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             else:
                 raise
 
+    # TODO: implement in cloud run
     def remove_function(self, function_name: str) -> None:
-        client = self._client("lambda")
-        client.delete_function(FunctionName=function_name)
+        client = self._run_client
+        full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
+        client.delete_service(name = full_path)
 
     def remove_role(self, role_name: str) -> None:
-        client = self._client("iam")
+        client = self._iam_admin_client
 
         managed_policies = client.list_attached_role_policies(RoleName=role_name)
         for policy in managed_policies.get("AttachedPolicies", []):
@@ -1077,6 +1098,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.NotFound:
             return False
 
+    # TODO: comment out for now, too complicated
     def deploy_remote_cli(
         self,
         function_name: str,
@@ -1111,6 +1133,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             function_name, image_uri, role_arn, timeout, memory_size, ephemeral_storage
         )
 
+    # TODO: comment out for now, too complicated
     def _generate_framework_dockerfile(self, handler: str, env_vars: dict) -> str:
         # Create ENV statements for each environment variable
         env_statements = "\n".join([f'ENV {key}="{value}"' for key, value in env_vars.items()])
