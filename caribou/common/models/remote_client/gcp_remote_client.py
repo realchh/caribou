@@ -38,7 +38,7 @@ from caribou.common.constants import (
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
     SYNC_TABLE_TTL,
-    SYNC_TABLE_TTL_ATTRIBUTE_NAME,
+    SYNC_TABLE_TTL_ATTRIBUTE_NAME, DEPLOYMENT_RESOURCES_TABLE,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str
@@ -77,6 +77,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._storage_client = storage.Client(project=self._project_id, credentials=self._credentials)
         self._firestore_client = firestore.Client(credentials=self._credentials)
         self._pubsub_publisher_client = pubsub_v1.PublisherClient(credentials=self._credentials)
+        self._pubsub_subscriber_client = pubsub_v1.SubscriberClient(credentials=self._credentials)
         self._eventarc_client = eventarc_v1.EventarcClient(credentials=self._credentials)
         self._artifact_registry_client = artifactregistry_v1.ArtifactRegistryClient(credentials=self._credentials)
         self._iam_admin_client = IAMClient(credentials=self._credentials)
@@ -739,7 +740,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     # TODO: create pubsub subscription
     def subscribe_sns_topic(self, topic_arn: str, protocol: str, endpoint: str) -> None:
-        client = self._client("sns")
+        client = self._pubsub_publisher_client
         response = client.subscribe(
             TopicArn=topic_arn,
             Protocol=protocol,
@@ -748,123 +749,101 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         )
         return response["SubscriptionArn"]
 
-    # TODO: remove and add permission for cloud run functions to pubsub
-    def add_lambda_permission_for_sns_topic(self, topic_arn: str, lambda_function_arn: str) -> None:
-        client = self._client("lambda")
-        try:
-            client.remove_permission(FunctionName=lambda_function_arn, StatementId="sns")
-        except ClientError:
-            # No permission to remove
-            pass
-        client.add_permission(
-            FunctionName=lambda_function_arn,
-            StatementId="sns",
-            Action="lambda:InvokeFunction",
-            Principal="sns.amazonaws.com",
-            SourceArn=topic_arn,
-        )
+    def add_pubsub_permission_for_cloud_run(self, service_name: str) -> None:
+        client = self._run_client
+        full_name = client.service_path(self._project_id, self._region, service_name)
+        policy = client.get_iam_policy(request={"resource": full_name})
+        invoker_member = f"serviceAccount:service-{self._project_id}@gcp-sa-pubsub.iam.gserviceaccount.com"
 
-    # TODO: send message to pubsub topic
+        for binding in policy.bindings:
+            if binding["role"] == "roles/run.invoker" and invoker_member in binding["members"]:
+                return
+
+        policy.bindings.append({
+            "role": "roles/run.invoker",
+            "members": [invoker_member]
+        })
+        client.set_iam_policy(request={"resource": full_name, "policy": policy})
+
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
-        client = self._client("sns")
-        client.publish(TopicArn=identifier, Message=message)
+        client = self._pubsub_publisher_client
+        topic_path = client.topic_path(self._project_id, identifier)
+        client.publish(topic=topic_path, data=compress_json_str(message))
 
-    # TODO: set firestore table value
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
-        client = self._client("dynamodb")
-
+        client = self._firestore_client
+        doc = client.collection(table_name).document(key)
         if convert_to_bytes:
-            client.put_item(TableName=table_name, Item={"key": {"S": key}, "value": {"B": compress_json_str(value)}})
+            doc.set({"value": compress_json_str(value)})
         else:
-            client.put_item(TableName=table_name, Item={"key": {"S": key}, "value": {"S": value}})
+            doc.set({"value": value})
 
-    # TODO: update firestore table value
     def update_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
-        client = self._client("dynamodb")
-        expression_attribute_values: dict[str, Any]
+        client = self._firestore_client
+        doc = client.collection(table_name).document(key)
         if convert_to_bytes:
-            expression_attribute_values = {":value": {"B": compress_json_str(value)}}
+            doc.update({"value": compress_json_str(value)})
         else:
-            expression_attribute_values = {":value": {"S": value}}
-
-        client.update_item(
-            TableName=table_name,
-            Key={"key": {"S": key}},
-            UpdateExpression="SET #v = :value",
-            ExpressionAttributeNames={"#v": "value"},
-            ExpressionAttributeValues=expression_attribute_values,
-        )
+            doc.update({"value": value})
 
     def set_value_in_table_column(
         self, table_name: str, key: str, column_type_value: list[tuple[str, str, str]]
     ) -> None:
-        client = self._client("dynamodb")
-        expression_attribute_names = {}
-        expression_attribute_values = {}
-        update_expression = "SET "
+        client = self._firestore_client
+        doc_ref = client.collection(table_name).document(key)
+
+        update_data = {}
         for column, type_, value in column_type_value:
-            expression_attribute_names[f"#{column}"] = column
-            expression_attribute_values[f":{column}"] = {type_: value}
-            update_expression += f"#{column} = :{column}, "
-        update_expression = update_expression[:-2]
-        client.update_item(
-            TableName=table_name,
-            Key={"key": {"S": key}},
-            ExpressionAttributeNames=expression_attribute_names,
-            ExpressionAttributeValues=expression_attribute_values,
-            UpdateExpression=update_expression,
-        )
+            if type_ == "S":
+                update_data[column] = value
+            else:
+                update_data[column] = compress_json_str(value)
+
+        doc_ref.set(update_data, merge=True)
 
     def get_value_from_table(self, table_name: str, key: str, consistent_read: bool = True) -> tuple[str, float]:
-        client = self._client("dynamodb")
-        response = client.get_item(
-            TableName=table_name,
-            Key={"key": {"S": key}},
-            ConsistentRead=consistent_read,
-            ReturnConsumedCapacity="TOTAL",
-        )
+        client = self._firestore_client
+        doc = client.collection(table_name).document(key).get()
 
-        # Record the consumed capacity (Read Capacity Units) for the sync node
-        consumed_read_capacity = response.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
+        consumed_read_capacity = 0.0
 
-        if "Item" not in response:
+        if not doc.exists:
             return "", consumed_read_capacity
 
-        item = response.get("Item")
-        if item is not None and "value" in item:
-            # Detect if the value is compressed (in bytes) and decompress it
-            if "B" in item["value"]:
-                return decompress_json_str(item["value"]["B"]), consumed_read_capacity
+        value = doc.to_dict().get("value")
 
-            return item["value"]["S"], consumed_read_capacity
+        if isinstance(value, bytes):
+            return decompress_json_str(value), consumed_read_capacity
+
+        if isinstance(value, str):
+            return value, consumed_read_capacity
 
         return "", consumed_read_capacity
 
     def remove_value_from_table(self, table_name: str, key: str) -> None:
-        client = self._client("dynamodb")
-        client.delete_item(TableName=table_name, Key={"key": {"S": key}})
+        client = self._firestore_client
+        client.collection(table_name).document(key).delete()
 
     def get_all_values_from_table(self, table_name: str) -> dict[str, Any]:
-        client = self._client("dynamodb")
-        response = client.scan(TableName=table_name)
-        if "Items" not in response:
-            return {}
-        items = response.get("Items")
-        if items is not None:
-            for item in items:
-                # Detect if the value is compressed (in bytes) and decompress it
-                if "value" in item and "B" in item["value"]:
-                    item["value"]["S"] = decompress_json_str(item["value"]["B"])
-                    del item["value"]["B"]
+        client = self._firestore_client
+        docs = client.collection(table_name).stream()
 
-            return {item["key"]["S"]: item["value"]["S"] for item in items}
+        result: dict[str, Any] = {}
+        for doc in docs:
+            doc_dict = doc.to_dict()
+            value = doc_dict.get("value")
 
-        return {}
+            if isinstance(value, bytes):
+                result[doc.id] = decompress_json_str(value)
+            elif isinstance(value, str):
+                result[doc.id] = value
+
+        return result
 
     def get_key_present_in_table(self, table_name: str, key: str, consistent_read: bool = True) -> bool:
-        client = self._client("dynamodb")
-        response = client.get_item(TableName=table_name, Key={"key": {"S": key}}, ConsistentRead=consistent_read)
-        return "Item" in response
+        client = self._firestore_client
+        doc = client.collection(table_name).document(key).get()
+        return doc.exists
 
     # TODO: upload resource to google cloud storage
     def upload_resource(self, key: str, resource: bytes) -> None:
