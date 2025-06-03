@@ -732,11 +732,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     # TODO: Create pubsub topic
     def create_sns_topic(self, topic_name: str) -> str:
-        client = self._client("sns")
+        client = self._pubsub_publisher_client
         # If topic exists, the following will return the existing topic
-        response = client.create_topic(Name=topic_name)
-        # See: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/create_topic.html
-        return response["TopicArn"]
+        response = client.create_topic(name = topic_name)
+        return response["name"]
 
     # TODO: create pubsub subscription
     def subscribe_sns_topic(self, topic_arn: str, protocol: str, endpoint: str) -> None:

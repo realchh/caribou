@@ -119,7 +119,7 @@ class ProviderRetriever(DataRetriever):
 
     def retrieve_gcp_regions(self) -> dict[str, dict[str, Any]]:
         # First we get a list of enabled regions for the current account
-        all_enabled_regions = self._retrieve_enabled_aws_regions()
+        # all_enabled_regions = self._retrieve_enabled_aws_regions()
 
         # Then we get the list of all regions from the AWS regions page
         # To get the location of the regions (Based on location name)
