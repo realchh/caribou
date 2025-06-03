@@ -14,6 +14,7 @@ from caribou.common.utils import str_to_bool
 from caribou.data_collector.components.data_retriever import DataRetriever
 from caribou.data_collector.utils.constants import AMAZON_REGION_URL
 
+
 # TODO: get GCP regions
 class ProviderRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:

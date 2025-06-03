@@ -9,40 +9,43 @@ import zipfile
 from datetime import datetime
 from typing import Any, Optional
 
-# from boto3.session import Session
-
-from google.cloud import (
-    storage,
-    pubsub_v1,
-    run_v2,
-    firestore,
-    logging_v2,
-    iam_admin_v1,
-    artifactregistry_v1,
-    scheduler_v1,
-    eventarc_v1
-)
-from google.oauth2 import service_account
-from google.auth import default as google_auth_default
 from google.api_core import exceptions as google_api_exceptions
 from google.api_core.client_options import ClientOptions
+from google.auth import default as google_auth_default
+from google.cloud import (
+    artifactregistry_v1,
+    eventarc_v1,
+    firestore,
+    iam_admin_v1,
+    logging_v2,
+    pubsub_v1,
+    run_v2,
+    scheduler_v1,
+    storage,
+)
+from google.cloud.iam_admin_v1 import IAMClient
+from google.cloud.iam_admin_v1 import types as iam_admin_types
 from google.iam.v1 import iam_policy_pb2, policy_pb2
-from google.cloud.iam_admin_v1 import IAMClient, types as iam_admin_types
+from google.oauth2 import service_account
 from google.protobuf.json_format import MessageToDict
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
+    DEPLOYMENT_RESOURCES_TABLE,
     GLOBAL_SYSTEM_REGION,
     REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
     SYNC_TABLE_TTL,
-    SYNC_TABLE_TTL_ATTRIBUTE_NAME, DEPLOYMENT_RESOURCES_TABLE,
+    SYNC_TABLE_TTL_ATTRIBUTE_NAME,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str
 from caribou.deployment.common.deploy.models.resource import Resource
+
+# from boto3.session import Session
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +55,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     FUNCTION_CREATE_ATTEMPTS = 30
     DELAY_TIME = 5
 
-    def __init__(self, project_id: str | None = None, region: str | None = None, credentials_path: str | None = None) -> None:
+    def __init__(
+        self, project_id: str | None = None, region: str | None = None, credentials_path: str | None = None
+    ) -> None:
         if credentials_path:
             self._credentials = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                credentials_path, scopes=["https://www.googleapis.com/auth/cloud-platform"]
             )
             default_project_id = self._credentials.project_id
         else:
@@ -124,10 +128,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         template = service_dict.get("template", {})
 
         # Extract environment variables into a simple {key: value} dict
-        env_vars = {
-            env["name"]: env.get("value", "")
-            for env in container.get("env", [])
-        }
+        env_vars = {env["name"]: env.get("value", "") for env in container.get("env", [])}
 
         # The formatted dictionary
         formatted_config = {
@@ -734,7 +735,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def create_sns_topic(self, topic_name: str) -> str:
         client = self._pubsub_publisher_client
         # If topic exists, the following will return the existing topic
-        response = client.create_topic(name = topic_name)
+        response = client.create_topic(name=topic_name)
         return response["name"]
 
     # TODO: create pubsub subscription
@@ -758,10 +759,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             if binding["role"] == "roles/run.invoker" and invoker_member in binding["members"]:
                 return
 
-        policy.bindings.append({
-            "role": "roles/run.invoker",
-            "members": [invoker_member]
-        })
+        policy.bindings.append({"role": "roles/run.invoker", "members": [invoker_member]})
         client.set_iam_policy(request={"resource": full_name, "policy": policy})
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
@@ -997,7 +995,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def remove_function(self, function_name: str) -> None:
         client = self._run_client
         full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
-        client.delete_service(name = full_path)
+        client.delete_service(name=full_path)
 
     def remove_role(self, role_name: str) -> None:
         client = self._iam_admin_client

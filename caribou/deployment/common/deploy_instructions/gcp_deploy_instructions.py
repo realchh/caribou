@@ -7,27 +7,16 @@ from caribou.deployment.common.deploy.models.variable import Variable
 from caribou.deployment.common.deploy_instructions.deploy_instructions import DeployInstructions
 
 
-class AWSDeployInstructions(DeployInstructions):
+class GCPDeployInstructions(DeployInstructions):
     def __init__(self, region: str, provider: Provider) -> None:
         super().__init__(region, provider)
-        self._lambda_trust_policy = {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Sid": "",
-                    "Effect": "Allow",
-                    "Principal": {"Service": "lambda.amazonaws.com"},
-                    "Action": "sts:AssumeRole",
-                }
-            ],
-        }
 
     def _get_create_iam_role_instruction(self, role: IAMRole, iam_role_varname: str) -> Instruction:
+        # In GCP we normally create a service account and attach roles
         return APICall(
-            name="create_role",
+            name="create_service_account",
             params={
-                "role_name": role.name,
-                "trust_policy": self._lambda_trust_policy,
+                "service_account_name": role.name,
                 "policy": role.get_policy(self._provider),
             },
             output_var=iam_role_varname,
@@ -35,10 +24,9 @@ class AWSDeployInstructions(DeployInstructions):
 
     def _get_update_iam_role_instruction(self, role: IAMRole, iam_role_varname: str) -> Instruction:
         return APICall(
-            name="update_role",
+            name="update_service_account",
             params={
-                "role_name": role.name,
-                "trust_policy": self._lambda_trust_policy,
+                "service_account_name": role.name,
                 "policy": role.get_policy(self._provider),
             },
             output_var=iam_role_varname,
@@ -55,17 +43,16 @@ class AWSDeployInstructions(DeployInstructions):
         function_varname: str,
     ) -> Instruction:
         return APICall(
-            name="create_function",
+            name="create_cloud_function",
             params={
                 "function_name": name,
-                "role_identifier": Variable(iam_role_varname),
+                "service_account": Variable(iam_role_varname),
                 "zip_contents": zip_contents,
                 "runtime": runtime,
-                "handler": handler,
+                "entry_point": handler,
                 "environment_variables": environment_variables,
                 "timeout": self._config["timeout"],
-                "memory_size": self._config["memory"],
-                "additional_docker_commands": self._config.get("additional_docker_commands", []),
+                "memory": self._config["memory"],
             },
             output_var=function_varname,
         )
@@ -81,24 +68,23 @@ class AWSDeployInstructions(DeployInstructions):
         function_varname: str,
     ) -> Instruction:
         return APICall(
-            name="update_function",
+            name="update_cloud_function",
             params={
                 "function_name": name,
-                "role_identifier": Variable(iam_role_varname),
+                "service_account": Variable(iam_role_varname),
                 "zip_contents": zip_contents,
                 "runtime": runtime,
-                "handler": handler,
+                "entry_point": handler,
                 "environment_variables": environment_variables,
                 "timeout": self._config["timeout"],
-                "memory_size": self._config["memory"],
-                "additional_docker_commands": self._config.get("additional_docker_commands", []),
+                "memory": self._config["memory"],
             },
             output_var=function_varname,
         )
 
     def _get_create_messaging_topic_instruction_for_region(self, output_var: str, name: str) -> Instruction:
         return APICall(
-            name="create_sns_topic",
+            name="create_pubsub_topic",
             params={
                 "topic_name": f"{name}_messaging_topic",
             },
@@ -109,11 +95,10 @@ class AWSDeployInstructions(DeployInstructions):
         self, messaging_topic_identifier_varname: str, function_varname: str, subscription_varname: str
     ) -> Instruction:
         return APICall(
-            name="subscribe_sns_topic",
+            name="create_pubsub_subscription",
             params={
-                "topic_arn": Variable(messaging_topic_identifier_varname),
-                "protocol": "lambda",
-                "endpoint": Variable(function_varname),
+                "topic": Variable(messaging_topic_identifier_varname),
+                "push_endpoint": Variable(function_varname),
             },
             output_var=subscription_varname,
         )
@@ -121,10 +106,9 @@ class AWSDeployInstructions(DeployInstructions):
     def _add_function_permission_for_messaging_topic_instruction(
         self, messaging_topic_identifier_varname: str, function_varname: str
     ) -> Instruction:
+        # In GCP the subscription already contains the push permission,
+        # so often no additional call is required. Keep a no-op for symmetry.
         return APICall(
-            name="add_lambda_permission_for_sns_topic",
-            params={
-                "topic_arn": Variable(messaging_topic_identifier_varname),
-                "lambda_function_arn": Variable(function_varname),
-            },
+            name="noop",
+            params={},
         )

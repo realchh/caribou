@@ -80,6 +80,5 @@ def main():
                 logger.info("Created table: %s", table_name)
 
 
-
 if __name__ == "__main__":
     main()
