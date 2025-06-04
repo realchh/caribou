@@ -15,6 +15,7 @@ import boto3
 import pip
 import yaml
 import zstandard
+import google.cloud.storage
 
 import caribou
 from caribou.common.models.remote_client.remote_client import RemoteClient
@@ -76,9 +77,15 @@ class DeploymentPackager:
 
         requirements = [requirement.split("==")[0] for requirement in requirements]
 
+        provider = self._determine_home_provider()
+
         with open(requirements_filename, "a", encoding="utf-8") as file:
-            if "boto3" not in requirements:
-                file.write(f"\nboto3=={boto3.__version__}\n")
+            if provider == "aws":
+                if "boto3" not in requirements:
+                    file.write(f"\nboto3=={boto3.__version__}\n")
+            if provider == "gcp":
+                if "google-cloud-storage" not in requirements:
+                    file.write(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
             if "pyyaml" not in requirements:
                 file.write(f"\npyyaml=={yaml.__version__}\n")
             if "pytz" not in requirements:
@@ -234,8 +241,13 @@ class DeploymentPackager:
             requirements = file.read().splitlines()
 
         # Add version of boto3 if not present in requirements
-        if "boto3" not in requirements:
-            requirements.append(f"boto3=={boto3.__version__}")
+        if self._determine_home_provider() == "aws":
+            if "boto3" not in requirements:
+                requirements.append(f"boto3=={boto3.__version__}")
+
+        if self._determine_home_provider() == "gcp":
+            if "google-cloud-storage" not in requirements:
+                requirements.append(f"google-cloud-storage=={google.cloud.storage.__version__}")
 
         # Add version of pyyaml if not present in requirements
         if "pyyaml" not in requirements:
@@ -330,6 +342,16 @@ class DeploymentPackager:
                 if full_path.startswith(framework_go_dir):
                     zip_path = full_path[len(project_dir) + 1 :]
                     zip_file.write(full_path, zip_path)
+
+    def _determine_home_provider(self) -> str:
+        home_region = self._config.home_region
+        if isinstance(home_region, dict):
+            return str(home_region.get("provider", "aws")).lower()
+        elif isinstance(home_region, str):
+            return str(home_region.split(":")[0]).lower()
+
+        return "aws"
+
 
 
 def pip_execute(command: str, args: list[str]) -> tuple[bytes, bytes]:

@@ -49,6 +49,8 @@ google-cloud-iam = "^2.19.0"
 google-cloud-artifact-registry = "^1.16.0"
 google-cloud-scheduler = "^2.16.1"
 google-cloud-eventarc = "^1.15.2"
+google-cloud-billing = "^1.16.2"
+google-cloud-functions = "^1.20.3"
 
 [tool.poetry.extras]
 # This can be used for a more fine-grained dependency management in the future

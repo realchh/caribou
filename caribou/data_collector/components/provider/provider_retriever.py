@@ -6,16 +6,16 @@ import boto3
 import googlemaps
 import requests
 from bs4 import BeautifulSoup
+from google.cloud import billing_v1
 
 from caribou.common.constants import GLOBAL_TIME_ZONE
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.provider import Provider
 from caribou.common.utils import str_to_bool
 from caribou.data_collector.components.data_retriever import DataRetriever
-from caribou.data_collector.utils.constants import AMAZON_REGION_URL
+from caribou.data_collector.utils.constants import AMAZON_REGION_URL, GCLOUD_REGION_URL
 
 
-# TODO: get GCP regions
 class ProviderRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:
         super().__init__(client)
@@ -30,6 +30,10 @@ class ProviderRetriever(DataRetriever):
 
         self._aws_pricing_client = boto3.client("pricing", region_name="us-east-1")  # Must be in us-east-1
         self._aws_region_name_to_code: dict[str, str] = {}
+        self._gcp_region_name_to_code: dict[str, str] = {}
+        self._gcp_catalog_client: billing_v1.CloudCatalogClient = billing_v1.CloudCatalogClient()
+        self._gcp_billing_client: billing_v1.CloudBillingClient = billing_v1.CloudBillingClient()
+        self._gcp_cloud_run_serviceId: str | None = None
 
     def retrieve_location(self, name: str) -> tuple[float, float]:
         google_maps = googlemaps.Client(key=self._google_api_key)
@@ -56,7 +60,7 @@ class ProviderRetriever(DataRetriever):
                 if provider == Provider.AWS:
                     available_regions.update(self.retrieve_aws_regions())
                 elif provider == Provider.GCP:
-                    pass
+                    available_regions.update(self.retrieve_gcp_regions())
                 elif provider in (Provider.TEST_PROVIDER1, Provider.TEST_PROVIDER2):
                     pass
                 elif provider == Provider.INTEGRATION_TEST_PROVIDER:
@@ -119,21 +123,18 @@ class ProviderRetriever(DataRetriever):
         return regions
 
     def retrieve_gcp_regions(self) -> dict[str, dict[str, Any]]:
-        # First we get a list of enabled regions for the current account
-        # all_enabled_regions = self._retrieve_enabled_aws_regions()
-
-        # Then we get the list of all regions from the AWS regions page
+        # We get the list of all regions from the GCP regions page
         # To get the location of the regions (Based on location name)
-        amazon_region_page = requests.get(AMAZON_REGION_URL, timeout=5)
+        gcp_region_page = requests.get(GCLOUD_REGION_URL, timeout=5)
 
-        amazon_region_page_soup = BeautifulSoup(amazon_region_page.content, "html.parser")
+        gcp_region_page_soup = BeautifulSoup(gcp_region_page.content, "html.parser")
 
         regions = {}
 
-        tables = amazon_region_page_soup.find_all("table")
+        tables = gcp_region_page_soup.find_all("table")
 
         if len(tables) == 0:
-            raise ValueError("Could not find any tables on the AWS regions page")
+            raise ValueError("Could not find any tables on the GCP regions page")
 
         # Process the first table (which is the regions table)
         table = tables[0]
@@ -144,22 +145,19 @@ class ProviderRetriever(DataRetriever):
             if len(table_cells) < 2:  # We only need first two columns (Code and Name)
                 continue
 
-            region_code = table_cells[0].text.strip()
+            zone_code = table_cells[0].text.strip()
+            region_code = zone_code.split("-")[0] + "-" + zone_code.split("-")[1]
             region_name = table_cells[1].text.strip()
 
-            if region_code not in all_enabled_regions:
-                # Skip regions that are not enabled for the current account
-                continue
-
             coordinates = self.retrieve_location(region_name)
-            regions[f"{Provider.AWS.value}:{region_code}"] = {
+            regions[f"{Provider.GCP.value}:{region_code}"] = {
                 "name": region_name,
-                "provider": Provider.AWS.value,
+                "provider": Provider.GCP.value,
                 "code": region_code,
                 "latitude": coordinates[0],
                 "longitude": coordinates[1],
             }
-            self._aws_region_name_to_code[region_name] = region_code
+            self._gcp_region_name_to_code[region_name] = region_code
         return regions
 
     def retrieve_integrationtest_regions(self) -> dict[str, dict[str, Any]]:
@@ -208,8 +206,10 @@ class ProviderRetriever(DataRetriever):
             try:
                 if provider == Provider.AWS.value:
                     provider_data.update(self._retrieve_provider_data_aws(regions))
+                    # pass
                 elif provider == Provider.GCP.value:
-                    raise NotImplementedError("GCP not implemented")
+                    # provider_data.update(self._retrieve_provider_data_gcp(regions))
+                    pass
                 elif provider in (Provider.TEST_PROVIDER1.value, Provider.TEST_PROVIDER2.value):
                     pass
                 elif provider == Provider.INTEGRATION_TEST_PROVIDER.value:
@@ -251,15 +251,15 @@ class ProviderRetriever(DataRetriever):
         }
 
     def _retrieve_provider_data_gcp(self, gcp_regions: list[str]) -> dict[str, Any]:
-        transmission_cost_dict = self._retrieve_aws_transmission_cost(gcp_regions)
+        # transmission_cost_dict = self._retrieve_gcp_transmission_cost(gcp_regions)
 
-        execution_cost_dict = self._retrieve_aws_execution_cost(gcp_regions)
+        execution_cost_dict = self._retrieve_gcp_execution_cost(gcp_regions)
 
-        sns_cost_dict = self._retrieve_aws_sns_cost(gcp_regions)
-
-        dynamodb_cost_dict = self._retrieve_aws_dynamodb_cost(gcp_regions)
-
-        ecr_cost_dict = self._retrieve_aws_ecr_cost(gcp_regions)
+        # sns_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
+        #
+        # dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
+        #
+        # ecr_cost_dict = self._retrieve_gcp_artifact_registry_cost(gcp_regions)
 
         return {
             region_key: {
@@ -273,7 +273,7 @@ class ProviderRetriever(DataRetriever):
                 "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.00426,
                 "min_cpu_power_kWh": 0.00071,
-                "available_architectures": self._retrieve_aws_available_architectures(execution_cost_dict[region_key]),
+                "available_architectures": self._retrieve_gcp_available_architectures(execution_cost_dict[region_key]),
             }
             for region_key in gcp_regions
         }
@@ -400,6 +400,12 @@ class ProviderRetriever(DataRetriever):
             available_architectures.append("arm64")
         if execution_cost["invocation_cost"]["x86_64"] > 0:
             available_architectures.append("x86_64")
+        return available_architectures
+
+    def _retrieve_gcp_available_architectures(self, execution_cost: dict[str, Any]) -> list[str]:
+        available_architectures = []
+        available_architectures.append("arm64")
+        available_architectures.append("x86_64")
         return available_architectures
 
     # this part is hardcoded because when using the api it only worked for us-east-1
@@ -783,6 +789,81 @@ class ProviderRetriever(DataRetriever):
                 },
                 "compute_cost": {
                     "arm64": compute_cost_arm64 if len(invocation_call_sku_arm64) > 0 else 0,
+                    "x86_64": compute_cost_x86_64,
+                    "free_tier_compute_gb_s": free_compute_gb_s,
+                },
+                "unit": "USD",
+            }
+
+        if len(execution_cost_dict) != len(available_region):
+            raise ValueError("Not all regions have execution cost data")
+        return execution_cost_dict
+
+    def _retrieve_gcp_execution_cost(self, available_region: list[str]) -> dict[str, Any]:
+        client = billing_v1.CloudCatalogClient()
+        service_list = client.list_services()
+        for service in service_list:
+            if service.display_name == "Cloud Run":
+                self._gcp_cloud_run_serviceId = "services/" + service.service_id
+                break
+
+        print(self._gcp_cloud_run_serviceId)
+
+        sku_list = client.list_skus(parent=self._gcp_cloud_run_serviceId)
+
+        available_region_code_to_key = {region_key.split(":")[1]: region_key for region_key in available_region}
+
+        current_invocations = 0
+
+        execution_cost_dict = {}
+        for price_list in sku_list:
+            region_code = price_list["service_regions"]
+
+            if region_code not in available_region_code_to_key:
+                continue
+
+            print(price_list)
+            price_list_file = billing_v1.PricingInfo()
+
+            response = requests.get(price_list_file["Url"], timeout=5)
+            price_list_file_json = response.json()
+
+            (
+
+            ) = self.get_aws_product_skus(price_list_file_json)
+
+            free_duration_item = price_list_file_json["terms"]["OnDemand"][invocation_duration_free_tier_sku][
+                list(price_list_file_json["terms"]["OnDemand"][invocation_duration_free_tier_sku].keys())[0]
+            ]
+            free_compute_gb_s = int(
+                free_duration_item["priceDimensions"][list(free_duration_item["priceDimensions"].keys())[0]]["endRange"]
+            )  # in seconds
+
+            invocation_cost_arm64 = 0.0
+
+            invocation_cost_item_x86_64 = price_list_file_json["terms"]["OnDemand"][invocation_call_sku_x86_64][
+                list(price_list_file_json["terms"]["OnDemand"][invocation_call_sku_x86_64].keys())[0]
+            ]
+            invocation_cost_x86_64 = float(
+                invocation_cost_item_x86_64["priceDimensions"][
+                    list(invocation_cost_item_x86_64["priceDimensions"].keys())[0]
+                ]["pricePerUnit"]["USD"]
+            )
+
+            compute_cost_item_sku_x86_64 = price_list_file_json["terms"]["OnDemand"][invocation_duration_sku_x86_64][
+                list(price_list_file_json["terms"]["OnDemand"][invocation_duration_sku_x86_64].keys())[0]
+            ]
+
+            compute_cost_x86_64 = compute_cost_item_sku_x86_64["priceDimensions"]
+
+            compute_cost_x86_64 = self._get_compute_cost(compute_cost_x86_64, current_invocations)
+
+            execution_cost_dict[available_region_code_to_key[region_code]] = {
+                "invocation_cost": {
+                    "x86_64": invocation_cost_x86_64,
+                    "free_tier_invocations": free_invocations,
+                },
+                "compute_cost": {
                     "x86_64": compute_cost_x86_64,
                     "free_tier_compute_gb_s": free_compute_gb_s,
                 },

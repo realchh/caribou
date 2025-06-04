@@ -1337,6 +1337,27 @@ googleapis-common-protos = ">=1.56.2,<2.0.0"
 protobuf = ">=3.20.2,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
 
 [[package]]
+name = "google-cloud-billing"
+version = "1.16.2"
+description = "Google Cloud Billing API client library"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "google_cloud_billing-1.16.2-py3-none-any.whl", hash = "sha256:d7b9cfbb61502ecc7b6702abb0394ecabc53f0813b6ee6c28a55f8ce8bbc1971"},
+    {file = "google_cloud_billing-1.16.2.tar.gz", hash = "sha256:49ed14e5b184731ec9207e0eaf0f72cbab4ac541a2017f939c1a3e3bb5966d04"},
+]
+
+[package.dependencies]
+google-api-core = {version = ">=1.34.1,<2.0.dev0 || >=2.11.dev0,<3.0.0", extras = ["grpc"]}
+google-auth = ">=2.14.1,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0"
+grpc-google-iam-v1 = ">=0.14.0,<1.0.0"
+proto-plus = [
+    {version = ">=1.25.0,<2.0.0", markers = "python_version >= \"3.13\""},
+    {version = ">=1.22.3,<2.0.0", markers = "python_version < \"3.13\""},
+]
+protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
+
+[[package]]
 name = "google-cloud-core"
 version = "2.4.3"
 description = "Google Cloud API client core library"
@@ -1395,6 +1416,27 @@ proto-plus = [
     {version = ">=1.22.2,<2.0.0", markers = "python_version >= \"3.11\" and python_version < \"3.13\""},
 ]
 protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0dev"
+
+[[package]]
+name = "google-cloud-functions"
+version = "1.20.3"
+description = "Google Cloud Functions API client library"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "google_cloud_functions-1.20.3-py3-none-any.whl", hash = "sha256:80b1d765fe1850a417a65c71120e863840758985b313fe5dbd9bb31b59c3bcf5"},
+    {file = "google_cloud_functions-1.20.3.tar.gz", hash = "sha256:969bae364f5bb600a6c8260a8a24432a61a3fc79dc651423974cc9f61b5b4a9d"},
+]
+
+[package.dependencies]
+google-api-core = {version = ">=1.34.1,<2.0.dev0 || >=2.11.dev0,<3.0.0", extras = ["grpc"]}
+google-auth = ">=2.14.1,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0"
+grpc-google-iam-v1 = ">=0.14.0,<1.0.0"
+proto-plus = [
+    {version = ">=1.25.0,<2.0.0", markers = "python_version >= \"3.13\""},
+    {version = ">=1.22.3,<2.0.0", markers = "python_version < \"3.13\""},
+]
+protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
 
 [[package]]
 name = "google-cloud-iam"
@@ -5387,4 +5429,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "690b83737b912d562fab9412326cf44264bfccee117a440910bf565c3a894d03"
+content-hash = "f6ccb32f52d68f4687241f412f923999425f0665327c8bbb088632d2ddacabe7"
