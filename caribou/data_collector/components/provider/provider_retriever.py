@@ -1,7 +1,5 @@
 import datetime
 import os
-from collections import defaultdict
-from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -9,7 +7,6 @@ import googlemaps
 import requests
 from bs4 import BeautifulSoup
 from google.cloud import billing_v1
-from google.type import money_pb2 as Money
 
 from caribou.common.constants import GLOBAL_TIME_ZONE
 from caribou.common.models.remote_client.remote_client import RemoteClient
@@ -19,13 +16,7 @@ from caribou.data_collector.components.data_retriever import DataRetriever
 from caribou.data_collector.utils.constants import AMAZON_REGION_URL, GCLOUD_REGION_URL
 
 
-def _unit_price_to_float(price: Money) -> float:
-    """Convert google.type.Money to a native float (USD)."""
-    return float(Decimal(price.units) + Decimal(price.nanos) / Decimal(1e9))
-
-
-# pylint: disable=too-many-lines
-class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-attributes
+class ProviderRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:
         super().__init__(client)
         self._integration_test_on = str_to_bool(os.environ.get("INTEGRATIONTEST_ON", "False"))
@@ -41,7 +32,8 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         self._aws_region_name_to_code: dict[str, str] = {}
         self._gcp_region_name_to_code: dict[str, str] = {}
         self._gcp_catalog_client: billing_v1.CloudCatalogClient = billing_v1.CloudCatalogClient()
-        self._gcp_cloud_run_service_id: str | None = None
+        self._gcp_billing_client: billing_v1.CloudBillingClient = billing_v1.CloudBillingClient()
+        self._gcp_cloud_run_serviceId: str | None = None
 
     def retrieve_location(self, name: str) -> tuple[float, float]:
         google_maps = googlemaps.Client(key=self._google_api_key)
@@ -214,8 +206,10 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             try:
                 if provider == Provider.AWS.value:
                     provider_data.update(self._retrieve_provider_data_aws(regions))
+                    # pass
                 elif provider == Provider.GCP.value:
-                    provider_data.update(self._retrieve_provider_data_gcp(regions))
+                    # provider_data.update(self._retrieve_provider_data_gcp(regions))
+                    pass
                 elif provider in (Provider.TEST_PROVIDER1.value, Provider.TEST_PROVIDER2.value):
                     pass
                 elif provider == Provider.INTEGRATION_TEST_PROVIDER.value:
@@ -257,17 +251,21 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         }
 
     def _retrieve_provider_data_gcp(self, gcp_regions: list[str]) -> dict[str, Any]:
-        transmission_cost_dict = self._retrieve_gcp_transmission_cost(gcp_regions)
+        # transmission_cost_dict = self._retrieve_gcp_transmission_cost(gcp_regions)
+
         execution_cost_dict = self._retrieve_gcp_execution_cost(gcp_regions)
-        pubsub_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
-        dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
-        ecr_cost_dict = self._retrieve_gcp_artifact_registry_cost(gcp_regions)
+
+        # sns_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
+        #
+        # dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
+        #
+        # ecr_cost_dict = self._retrieve_gcp_artifact_registry_cost(gcp_regions)
 
         return {
             region_key: {
                 "execution_cost": execution_cost_dict[region_key],
                 "transmission_cost": transmission_cost_dict[region_key],
-                "sns_cost": pubsub_cost_dict[region_key],
+                "sns_cost": sns_cost_dict[region_key],
                 "dynamodb_cost": dynamodb_cost_dict[region_key],
                 "ecr_cost": ecr_cost_dict[region_key],
                 "pue": 1.1,
@@ -275,7 +273,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.00426,
                 "min_cpu_power_kWh": 0.00071,
-                "available_architectures": self._retrieve_gcp_available_architectures(),
+                "available_architectures": self._retrieve_gcp_available_architectures(execution_cost_dict[region_key]),
             }
             for region_key in gcp_regions
         }
@@ -404,7 +402,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             available_architectures.append("x86_64")
         return available_architectures
 
-    def _retrieve_gcp_available_architectures(self) -> list[str]:
+    def _retrieve_gcp_available_architectures(self, execution_cost: dict[str, Any]) -> list[str]:
         available_architectures = []
         available_architectures.append("arm64")
         available_architectures.append("x86_64")
@@ -471,23 +469,6 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         return result_sns_cost_dict
 
-    def _retrieve_gcp_pubsub_cost(self, available_regions: list[str]) -> dict[str, Any]:
-        result_sns_cost_dict = {}
-
-        for region_key in available_regions:
-            if ":" not in region_key:
-                raise ValueError(f"Invalid region key {region_key}")
-
-            # from https://cloud.google.com/pubsub/pricing
-            sns_cost = 40
-
-            result_sns_cost_dict[region_key] = {
-                "request_cost": sns_cost / 1024 * 1024 * 1024,
-                "unit": "USD/requests",
-            }
-
-        return result_sns_cost_dict
-
     def _retrieve_aws_dynamodb_cost(self, available_region: list[str]) -> dict[str, Any]:
         dynamodb_cost_response = self._aws_pricing_client.list_price_lists(
             ServiceCode="AmazonDynamoDB", EffectiveDate=datetime.datetime.now(), CurrencyCode="USD"
@@ -524,68 +505,6 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             }
 
         return dynamodb_cost_dict
-
-    # pylint: disable=too-many-branches
-    def _retrieve_gcp_firestore_cost(self, available_region: list[str]) -> dict[str, Any]:
-        client = self._gcp_catalog_client
-
-        firestore_svc = None
-        for svc in client.list_services():
-            if "firestore" in svc.display_name.lower():
-                firestore_svc = svc
-                break
-
-        if firestore_svc is None:
-            raise RuntimeError("Could not find Firestore service from GCP Catalog")
-
-        available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
-
-        firestore_storage_cost_dict: dict[str, dict[str, float | str]] = defaultdict(
-            lambda: {
-                "read_request_cost": -1.0,  # USD per 100,000 reads
-                "write_request_cost": -1.0,  # USD per 100,000 writes
-                "storage_cost": -1.0,  # USD per gigabyte per month
-                "unit": "USD",
-            }
-        )
-
-        for sku in client.list_skus(parent=firestore_svc.name):
-            if any(bad in sku.description for bad in ("Backup", "Data Transfer", "Enterprise", "(with free tier)")):
-                continue
-
-            if "FirestoreStorage" in sku.category.resource_group:
-                kind = "storage_cost"
-            elif "FirestoreEntityPutOps" in sku.category.resource_group:
-                kind = "write_request_cost"
-            elif "FirestoreReadOps" in sku.category.resource_group:
-                kind = "read_request_cost"
-            else:
-                continue
-
-            region_codes = sku.geo_taxonomy.regions
-
-            available_regions = [r for r in region_codes if r in available_region_code]
-            if not available_regions:
-                continue
-
-            pricing_expression = sku.pricing_info[0].pricing_expression
-            price = _unit_price_to_float(pricing_expression.tiered_rates[0].unit_price)
-
-            for r in available_regions:
-                region_code = available_region_code[r]
-                if kind in ("write_request_cost", "read_request_cost"):
-                    price *= 10  # So that price unit is consistent (per 1M request)
-                firestore_storage_cost_dict[region_code][kind] = price
-
-        missing = [
-            k
-            for k, v in firestore_storage_cost_dict.items()
-            if -1.0 in (v["read_request_cost"], v["write_request_cost"], v["storage_cost"])
-        ]
-        if missing:
-            raise ValueError(f"Firestore prices missing in regions: {missing}")
-
-        return dict(firestore_storage_cost_dict)
 
     def get_dynamodb_on_demand_skus(self, price_list_file_json: dict[str, Any]) -> tuple[str, str, str]:
         read_request_sku = ""
@@ -659,48 +578,6 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         return ecr_cost_dict
 
-    def _retrieve_gcp_artifact_registry_cost(self, available_region: list[str]) -> dict[str, Any]:
-        client = self._gcp_catalog_client
-
-        artifact_registry_svc = None
-        for svc in client.list_services():
-            if "artifact registry" in svc.display_name.lower():
-                artifact_registry_svc = svc
-                break
-
-        if artifact_registry_svc is None:
-            raise RuntimeError("Could not find artifact registry service from GCP Catalog")
-
-        available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
-
-        artifact_registry_cost_dict: dict[str, dict[str, float | str]] = defaultdict(
-            lambda: {
-                "storage_cost": 0.0,
-                "unit": "USD",
-            }
-        )
-        for sku in client.list_skus(parent=artifact_registry_svc.name):
-            if "Storage" not in sku.description:
-                continue
-
-            for region_code in sku.service_regions:
-                if region_code == "global":
-                    for region in available_region_code.keys():
-                        artifact_registry_cost_dict[available_region_code[region]] = {
-                            "storage_cost": 0.0,
-                            "unit": "USD",
-                        }
-
-                elif region_code not in available_region_code:
-                    continue
-                else:
-                    artifact_registry_cost_dict[available_region_code[region_code]] = {
-                        "storage_cost": 0.0,
-                        "unit": "USD",
-                    }
-
-        return artifact_registry_cost_dict
-
     def get_ecr_skus(self, price_list_file_json: dict[str, Any]) -> str:
         storage_sku = ""
 
@@ -771,10 +648,19 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         result_transmission_cost_dict = {}
 
         exact_region_codes = {
-            "asia-southeast2": (0.19, 0.1),
-            "asia-northeast3": (0.19, 0.08),
-            "me-central2": (0.19, 0.08),
-            "northamerica-south1": (0.09265, 0.08),
+            "ap-east-1": (0.12, 0.09),
+            "ap-south-2": (0.1093, 0.086),
+            "ap-southeast-3": (0.132, 0.10),
+            "ap-southeast-4": (0.114, 0.10),
+            "ap-south-1": (0.1093, 0.086),
+            "ap-northeast-3": (0.114, 0.09),
+            "ap-northeast-2": (0.126, 0.08),
+            "ap-southeast-1": (0.12, 0.09),
+            "ap-southeast-2": (0.114, 0.098),
+            "ap-northeast-1": (0.114, 0.09),
+            "me-south-1": (0.117, 0.1105),
+            "me-central-1": (0.11, 0.085),
+            "sa-east-1": (0.15, 0.138),
         }
 
         for region_key in available_region:
@@ -782,33 +668,25 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 raise ValueError(f"Invalid region key {region_key}")
 
             region_code = region_key.split(":")[1]
+
             # Check if the region code is in the dictionary
             if region_code in exact_region_codes:
                 global_data_transfer, provider_data_transfer = exact_region_codes[region_code]
             elif region_code.startswith("us-"):
-                global_data_transfer = 0.12
+                global_data_transfer = 0.09
                 provider_data_transfer = 0.02
-            elif region_code.startswith("africa-"):
-                global_data_transfer = 0.15
-                provider_data_transfer = 0.08
-            elif region_code.startswith("asia-"):
-                global_data_transfer = 0.12
-                provider_data_transfer = 0.08
-            elif region_code.startswith("northamerica-"):
-                global_data_transfer = 0.12
+            elif region_code.startswith("af-"):
+                global_data_transfer = 0.154
+                provider_data_transfer = 0.147
+            elif region_code.startswith("ca-"):
+                global_data_transfer = 0.09
                 provider_data_transfer = 0.02
-            elif region_code.startswith("europe-"):
-                global_data_transfer = 0.12
+            elif region_code.startswith("eu-"):
+                global_data_transfer = 0.09
                 provider_data_transfer = 0.02
-            elif region_code.startswith("me-"):
-                global_data_transfer = 0.15
+            elif region_code.startswith("il-"):
+                global_data_transfer = 0.11
                 provider_data_transfer = 0.08
-            elif region_code.startswith("australia-"):
-                global_data_transfer = 0.19
-                provider_data_transfer = 0.08
-            elif region_code.startswith("southamerica-"):
-                global_data_transfer = 0.19
-                provider_data_transfer = 0.14
             else:
                 raise ValueError(f"Unknown region code {region_code}")
 
@@ -922,164 +800,79 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         return execution_cost_dict
 
     def _retrieve_gcp_execution_cost(self, available_region: list[str]) -> dict[str, Any]:
-        client = self._gcp_catalog_client
+        client = billing_v1.CloudCatalogClient()
+        service_list = client.list_services()
+        for service in service_list:
+            if service.display_name == "Cloud Run":
+                self._gcp_cloud_run_serviceId = "services/" + service.service_id
+                break
 
-        cloud_run_svc = next(s for s in client.list_services() if s.display_name == "Cloud Run Functions")
+        print(self._gcp_cloud_run_serviceId)
 
-        available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
+        sku_list = client.list_skus(parent=self._gcp_cloud_run_serviceId)
 
-        data_by_region: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {
-                "invocation_cost": {},
-                "compute_cost": {},
-                "unit": "USD",
-            }
-        )
+        available_region_code_to_key = {region_key.split(":")[1]: region_key for region_key in available_region}
 
-        for sku in client.list_skus(parent=cloud_run_svc.name):
-            region_codes = [r for r in sku.service_regions if r in available_region_code]
-            if not region_codes:
+        current_invocations = 0
+
+        execution_cost_dict = {}
+        for price_list in sku_list:
+            region_code = price_list["service_regions"]
+
+            if region_code not in available_region_code_to_key:
                 continue
 
-            pricing_expression = sku.pricing_info[0].pricing_expression
-            unit = pricing_expression.usage_unit
+            print(price_list)
+            price_list_file = billing_v1.PricingInfo()
 
-            if unit not in {"s", "GiBy.s"}:
-                continue
+            response = requests.get(price_list_file["Url"], timeout=5)
+            price_list_file_json = response.json()
 
-            if "(1st Gen)" in sku.description:
-                continue
+            (
 
-            if "Min-Instance" in sku.description:
-                continue
+            ) = self.get_aws_product_skus(price_list_file_json)
 
-            price = _unit_price_to_float(pricing_expression.tiered_rates[0].unit_price)
+            free_duration_item = price_list_file_json["terms"]["OnDemand"][invocation_duration_free_tier_sku][
+                list(price_list_file_json["terms"]["OnDemand"][invocation_duration_free_tier_sku].keys())[0]
+            ]
+            free_compute_gb_s = int(
+                free_duration_item["priceDimensions"][list(free_duration_item["priceDimensions"].keys())[0]]["endRange"]
+            )  # in seconds
 
-            for reg in region_codes:
-                key = available_region_code[reg]
-                if unit == "GiBy.s":
-                    data_by_region[key]["compute_cost"]["memory_gb_s"] = price
-                    data_by_region[key]["compute_cost"]["free_tier_compute_gb_s"] = 0.9 / price
+            invocation_cost_arm64 = 0.0
 
-                elif unit == "s":
-                    data_by_region[key]["compute_cost"]["cpu_s"] = price
-                    data_by_region[key]["compute_cost"]["free_tier_cpu_s"] = 4.32 / price
+            invocation_cost_item_x86_64 = price_list_file_json["terms"]["OnDemand"][invocation_call_sku_x86_64][
+                list(price_list_file_json["terms"]["OnDemand"][invocation_call_sku_x86_64].keys())[0]
+            ]
+            invocation_cost_x86_64 = float(
+                invocation_cost_item_x86_64["priceDimensions"][
+                    list(invocation_cost_item_x86_64["priceDimensions"].keys())[0]
+                ]["pricePerUnit"]["USD"]
+            )
 
-                data_by_region[key]["invocation_cost"]["price"] = 0.4 / 1000000
-                data_by_region[key]["invocation_cost"]["free_tier_invocations"] = 2000000
+            compute_cost_item_sku_x86_64 = price_list_file_json["terms"]["OnDemand"][invocation_duration_sku_x86_64][
+                list(price_list_file_json["terms"]["OnDemand"][invocation_duration_sku_x86_64].keys())[0]
+            ]
 
-        for region in available_region_code.values():
-            if region not in data_by_region.keys():
-                data_by_region[region] = self._gcp_execution_fallback(region)
+            compute_cost_x86_64 = compute_cost_item_sku_x86_64["priceDimensions"]
 
-        return dict(data_by_region)
+            compute_cost_x86_64 = self._get_compute_cost(compute_cost_x86_64, current_invocations)
 
-    def _gcp_execution_fallback(self, region_key: str) -> dict[str, Any]:
-        region_code = region_key.split(":")[1]
-        tier1_pricing = {"cpu": 0.000024, "mem": 0.0000025}
-        tier2_pricing = {"cpu": 0.0000336, "mem": 0.0000035}
-
-        tier1_regions = {
-            "asia-east1",
-            "asia-northeast1",
-            "asia-northeast2",
-            "asia-south1",
-            "europe-north1",
-            "europe-north2",
-            "europe-southwest1",
-            "europe-west1",
-            "europe-west4",
-            "europe-west8",
-            "europe-west9",
-            "me-west1",
-            "northamerica-south1",
-            "us-central1",
-            "us-east1",
-            "us-east4",
-            "us-east5",
-            "us-south1",
-            "us-west1",
-        }
-
-        tier2_regions = {
-            "africa-south1",
-            "asia-east2",
-            "asia-northeast3",
-            "asia-south2",
-            "asia-southeast1",
-            "asia-southeast2",
-            "australia-southeast1",
-            "australia-southeast2",
-            "europe-central2",
-            "europe-west2",
-            "europe-west3",
-            "europe-west6",
-            "europe-west10",
-            "europe-west12",
-            "me-central1",
-            "me-central2",
-            "northamerica-northeast1",
-            "northamerica-northeast2",
-            "southamerica-east1",
-            "southamerica-west1",
-            "us-west2",
-            "us-west3",
-            "us-west4",
-        }
-
-        if region_code in tier1_regions:
-            cpu_price_s = tier1_pricing.get("cpu")
-            mem_price_gb_s = tier1_pricing.get("mem")
-            if cpu_price_s:
-                free_tier_cpu_s = 4.32 / cpu_price_s
-            else:
-                free_tier_cpu_s = 240000
-
-            if mem_price_gb_s:
-                free_tier_compute_gb_s = 0.9 / mem_price_gb_s
-            else:
-                free_tier_compute_gb_s = 450000
-
-            return {
-                "compute_cost": {
-                    "cpu_s": cpu_price_s,
-                    "memory_gb_s": mem_price_gb_s,
-                    "free_tier_compute_gb_s": free_tier_compute_gb_s,
-                    "free_tier_cpu_s": free_tier_cpu_s,
-                },
+            execution_cost_dict[available_region_code_to_key[region_code]] = {
                 "invocation_cost": {
-                    "price": 0.4 / 1000000,
-                    "free_tier_invocations": 2000000,
+                    "x86_64": invocation_cost_x86_64,
+                    "free_tier_invocations": free_invocations,
                 },
-                "unit": "USD",
-            }
-        if region_code in tier2_regions:
-            cpu_price_s = tier2_pricing.get("cpu")
-            mem_price_gb_s = tier2_pricing.get("mem")
-            if cpu_price_s:
-                free_tier_cpu_s = 4.32 / cpu_price_s
-            else:
-                free_tier_cpu_s = 180000
-
-            if mem_price_gb_s:
-                free_tier_compute_gb_s = 0.9 / mem_price_gb_s
-            else:
-                free_tier_compute_gb_s = 360000
-            return {
                 "compute_cost": {
-                    "cpu_s": cpu_price_s,
-                    "memory_gb_s": mem_price_gb_s,
-                    "free_tier_compute_gb_s": free_tier_compute_gb_s,
-                    "free_tier_cpu_s": free_tier_cpu_s,
-                },
-                "invocation_cost": {
-                    "price": 0.4 / 1000000,
-                    "free_tier_invocations": 2000000,
+                    "x86_64": compute_cost_x86_64,
+                    "free_tier_compute_gb_s": free_compute_gb_s,
                 },
                 "unit": "USD",
             }
 
-        raise ValueError(f"Region not found: {region_code}")
+        if len(execution_cost_dict) != len(available_region):
+            raise ValueError("Not all regions have execution cost data")
+        return execution_cost_dict
 
     def _get_compute_cost(self, compute_cost: dict, current_invocations: int) -> float:
         for value in compute_cost.values():
@@ -1090,6 +883,50 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         raise ValueError(f"Could not find compute cost for {current_invocations} invocations")
 
     def get_aws_product_skus(self, price_list_file_json: dict) -> tuple[str, str, str, str, str, str]:
+        """
+        Returns the product UIDs for the invocation and duration of a Lambda function
+
+        architecture: "x86_64" or "arm64"
+        price_list: price list from the AWS Pricing API
+        """
+        invocation_call_sku_arm64 = ""
+        invocation_duration_sku_arm64 = ""
+        invocation_call_sku_x86_64 = ""
+        invocation_duration_sku_x86_64 = ""
+        invocation_call_free_tier_sku = ""
+        invocation_duration_free_tier_sku = ""
+
+        for product in price_list_file_json["products"].values():
+            if (
+                product["attributes"]["group"] == "AWS-Lambda-Requests-ARM"
+                and product["attributes"]["location"] != "Any"
+            ):
+                invocation_call_sku_arm64 = product["sku"]
+            if (
+                product["attributes"]["group"] == "AWS-Lambda-Duration-ARM"
+                and product["attributes"]["location"] != "Any"
+            ):
+                invocation_duration_sku_arm64 = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Requests" and product["attributes"]["location"] != "Any":
+                invocation_call_sku_x86_64 = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Duration" and product["attributes"]["location"] != "Any":
+                invocation_duration_sku_x86_64 = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Requests" and product["attributes"]["location"] == "Any":
+                invocation_call_free_tier_sku = product["sku"]
+            if product["attributes"]["group"] == "AWS-Lambda-Duration" and product["attributes"]["location"] == "Any":
+                invocation_duration_free_tier_sku = product["sku"]
+
+        return (
+            invocation_call_sku_arm64,
+            invocation_duration_sku_arm64,
+            invocation_call_sku_x86_64,
+            invocation_duration_sku_x86_64,
+            invocation_call_free_tier_sku,
+            invocation_duration_free_tier_sku,
+        )
+
+    # TODO: Get GCP SKUs
+    def get_gcp_product_skus(self, price_list_file_json: dict) -> tuple[str, str, str, str, str, str]:
         """
         Returns the product UIDs for the invocation and duration of a Lambda function
 
