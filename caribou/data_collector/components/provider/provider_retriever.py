@@ -1,5 +1,7 @@
 import datetime
 import os
+from collections import defaultdict
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -7,6 +9,8 @@ import googlemaps
 import requests
 from bs4 import BeautifulSoup
 from google.cloud import billing_v1
+from google.type import money_pb2 as Money
+
 
 from caribou.common.constants import GLOBAL_TIME_ZONE
 from caribou.common.models.remote_client.remote_client import RemoteClient
@@ -14,6 +18,11 @@ from caribou.common.provider import Provider
 from caribou.common.utils import str_to_bool
 from caribou.data_collector.components.data_retriever import DataRetriever
 from caribou.data_collector.utils.constants import AMAZON_REGION_URL, GCLOUD_REGION_URL
+
+
+def _unit_price_to_float(price: Money) -> float:
+    """Convert google.type.Money to a native float (USD)."""
+    return float(Decimal(price.units) + Decimal(price.nanos) / Decimal(1e9))
 
 
 class ProviderRetriever(DataRetriever):
@@ -205,11 +214,11 @@ class ProviderRetriever(DataRetriever):
         for provider, regions in grouped_by_provider.items():
             try:
                 if provider == Provider.AWS.value:
-                    provider_data.update(self._retrieve_provider_data_aws(regions))
-                    # pass
-                elif provider == Provider.GCP.value:
-                    # provider_data.update(self._retrieve_provider_data_gcp(regions))
+                    # provider_data.update(self._retrieve_provider_data_aws(regions))
                     pass
+                elif provider == Provider.GCP.value:
+                    provider_data.update(self._retrieve_provider_data_gcp(regions))
+                    # pass
                 elif provider in (Provider.TEST_PROVIDER1.value, Provider.TEST_PROVIDER2.value):
                     pass
                 elif provider == Provider.INTEGRATION_TEST_PROVIDER.value:
@@ -801,78 +810,56 @@ class ProviderRetriever(DataRetriever):
 
     def _retrieve_gcp_execution_cost(self, available_region: list[str]) -> dict[str, Any]:
         client = billing_v1.CloudCatalogClient()
-        service_list = client.list_services()
-        for service in service_list:
-            if service.display_name == "Cloud Run":
-                self._gcp_cloud_run_serviceId = "services/" + service.service_id
-                break
 
-        print(self._gcp_cloud_run_serviceId)
+        cloud_run_svc = next(
+            s for s in client.list_services() if s.display_name == "Cloud Run Functions"
+        )
+        # print(cloud_run_svc)
+        skus = client.list_skus(parent=cloud_run_svc.name)
+        # print(skus)
+        available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
 
-        sku_list = client.list_skus(parent=self._gcp_cloud_run_serviceId)
-
-        available_region_code_to_key = {region_key.split(":")[1]: region_key for region_key in available_region}
-
-        current_invocations = 0
-
-        execution_cost_dict = {}
-        for price_list in sku_list:
-            region_code = price_list["service_regions"]
-
-            if region_code not in available_region_code_to_key:
-                continue
-
-            print(price_list)
-            price_list_file = billing_v1.PricingInfo()
-
-            response = requests.get(price_list_file["Url"], timeout=5)
-            price_list_file_json = response.json()
-
-            (
-
-            ) = self.get_aws_product_skus(price_list_file_json)
-
-            free_duration_item = price_list_file_json["terms"]["OnDemand"][invocation_duration_free_tier_sku][
-                list(price_list_file_json["terms"]["OnDemand"][invocation_duration_free_tier_sku].keys())[0]
-            ]
-            free_compute_gb_s = int(
-                free_duration_item["priceDimensions"][list(free_duration_item["priceDimensions"].keys())[0]]["endRange"]
-            )  # in seconds
-
-            invocation_cost_arm64 = 0.0
-
-            invocation_cost_item_x86_64 = price_list_file_json["terms"]["OnDemand"][invocation_call_sku_x86_64][
-                list(price_list_file_json["terms"]["OnDemand"][invocation_call_sku_x86_64].keys())[0]
-            ]
-            invocation_cost_x86_64 = float(
-                invocation_cost_item_x86_64["priceDimensions"][
-                    list(invocation_cost_item_x86_64["priceDimensions"].keys())[0]
-                ]["pricePerUnit"]["USD"]
-            )
-
-            compute_cost_item_sku_x86_64 = price_list_file_json["terms"]["OnDemand"][invocation_duration_sku_x86_64][
-                list(price_list_file_json["terms"]["OnDemand"][invocation_duration_sku_x86_64].keys())[0]
-            ]
-
-            compute_cost_x86_64 = compute_cost_item_sku_x86_64["priceDimensions"]
-
-            compute_cost_x86_64 = self._get_compute_cost(compute_cost_x86_64, current_invocations)
-
-            execution_cost_dict[available_region_code_to_key[region_code]] = {
-                "invocation_cost": {
-                    "x86_64": invocation_cost_x86_64,
-                    "free_tier_invocations": free_invocations,
-                },
-                "compute_cost": {
-                    "x86_64": compute_cost_x86_64,
-                    "free_tier_compute_gb_s": free_compute_gb_s,
-                },
+        data_by_region = defaultdict(
+            lambda: {
+                "invocation_cost": {},
+                "compute_cost": {},
                 "unit": "USD",
             }
+        )
 
-        if len(execution_cost_dict) != len(available_region):
-            raise ValueError("Not all regions have execution cost data")
-        return execution_cost_dict
+        for sku in skus:
+            available_regions = [r for r in sku.service_regions if r in available_region_code]
+            if not available_regions:
+                continue
+
+            pricing_expression = sku.pricing_info[0].pricing_expression
+            unit = pricing_expression.usage_unit
+            # print(unit)
+            if unit not in {"s", "GiBy.s"}:
+                continue
+
+            if "(1st Gen)" in sku.description:
+                continue
+
+            if "Min-Instance" in sku.description:
+                continue
+
+            price = _unit_price_to_float(pricing_expression.tiered_rates[0].unit_price)
+
+            for reg in available_regions:
+                key = available_region_code[reg]
+                if unit == "GiBy.s":
+                    data_by_region[key]["compute_cost"]["memory_gb_s"] = price
+                    data_by_region[key]["compute_cost"]["free_tier_compute_gb_s"] = 0.9/price
+
+                elif unit == "s":
+                    data_by_region[key]["compute_cost"]["cpu_s"] = price
+                    data_by_region[key]["compute_cost"]["free_tier_cpu_s"] = 4.32/price
+
+                data_by_region[key]["invocation_cost"]["price"] = 0.4/1000000
+                data_by_region[key]["invocation_cost"]["free_tier_invocations"] = 2000000
+
+        return dict(data_by_region)
 
     def _get_compute_cost(self, compute_cost: dict, current_invocations: int) -> float:
         for value in compute_cost.values():
