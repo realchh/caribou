@@ -802,6 +802,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client = self._firestore_client
         doc = client.collection(table_name).document(key).get()
 
+        # TODO: GCP capacity = 1/64 RCU
         consumed_read_capacity = 0.0
 
         if not doc.exists:

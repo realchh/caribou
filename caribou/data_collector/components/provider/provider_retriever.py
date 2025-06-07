@@ -260,11 +260,11 @@ class ProviderRetriever(DataRetriever):
         }
 
     def _retrieve_provider_data_gcp(self, gcp_regions: list[str]) -> dict[str, Any]:
-        # transmission_cost_dict = self._retrieve_gcp_transmission_cost(gcp_regions)
+        transmission_cost_dict = self._retrieve_gcp_transmission_cost(gcp_regions)
 
         execution_cost_dict = self._retrieve_gcp_execution_cost(gcp_regions)
 
-        # sns_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
+        pubsub_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
         #
         # dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
         #
@@ -274,7 +274,7 @@ class ProviderRetriever(DataRetriever):
             region_key: {
                 "execution_cost": execution_cost_dict[region_key],
                 "transmission_cost": transmission_cost_dict[region_key],
-                "sns_cost": sns_cost_dict[region_key],
+                "sns_cost": pubsub_cost_dict[region_key],
                 "dynamodb_cost": dynamodb_cost_dict[region_key],
                 "ecr_cost": ecr_cost_dict[region_key],
                 "pue": 1.1,
@@ -478,6 +478,23 @@ class ProviderRetriever(DataRetriever):
 
         return result_sns_cost_dict
 
+    def _retrieve_gcp_pubsub_cost(self, available_regions: list[str]) -> dict[str, Any]:
+        result_sns_cost_dict = {}
+
+        for region_key in available_regions:
+            if ":" not in region_key:
+                raise ValueError(f"Invalid region key {region_key}")
+
+            # from https://cloud.google.com/pubsub/pricing
+            sns_cost = 40
+
+            result_sns_cost_dict[region_key] = {
+                "request_cost": sns_cost / 1024 * 1024 * 1024,
+                "unit": "USD/requests",
+            }
+
+        return result_sns_cost_dict
+
     def _retrieve_aws_dynamodb_cost(self, available_region: list[str]) -> dict[str, Any]:
         dynamodb_cost_response = self._aws_pricing_client.list_price_lists(
             ServiceCode="AmazonDynamoDB", EffectiveDate=datetime.datetime.now(), CurrencyCode="USD"
@@ -657,19 +674,10 @@ class ProviderRetriever(DataRetriever):
         result_transmission_cost_dict = {}
 
         exact_region_codes = {
-            "ap-east-1": (0.12, 0.09),
-            "ap-south-2": (0.1093, 0.086),
-            "ap-southeast-3": (0.132, 0.10),
-            "ap-southeast-4": (0.114, 0.10),
-            "ap-south-1": (0.1093, 0.086),
-            "ap-northeast-3": (0.114, 0.09),
-            "ap-northeast-2": (0.126, 0.08),
-            "ap-southeast-1": (0.12, 0.09),
-            "ap-southeast-2": (0.114, 0.098),
-            "ap-northeast-1": (0.114, 0.09),
-            "me-south-1": (0.117, 0.1105),
-            "me-central-1": (0.11, 0.085),
-            "sa-east-1": (0.15, 0.138),
+            "asia-southeast2": (0.19, 0.1),
+            "asia-northeast3": (0.19, 0.08),
+            "me-central2": (0.19, 0.08),
+            "northamerica-south1": (0.09265, 0.08),
         }
 
         for region_key in available_region:
@@ -677,25 +685,34 @@ class ProviderRetriever(DataRetriever):
                 raise ValueError(f"Invalid region key {region_key}")
 
             region_code = region_key.split(":")[1]
-
+            print(region_code)
             # Check if the region code is in the dictionary
             if region_code in exact_region_codes:
                 global_data_transfer, provider_data_transfer = exact_region_codes[region_code]
             elif region_code.startswith("us-"):
-                global_data_transfer = 0.09
+                global_data_transfer = 0.12
                 provider_data_transfer = 0.02
-            elif region_code.startswith("af-"):
-                global_data_transfer = 0.154
-                provider_data_transfer = 0.147
-            elif region_code.startswith("ca-"):
-                global_data_transfer = 0.09
-                provider_data_transfer = 0.02
-            elif region_code.startswith("eu-"):
-                global_data_transfer = 0.09
-                provider_data_transfer = 0.02
-            elif region_code.startswith("il-"):
-                global_data_transfer = 0.11
+            elif region_code.startswith("africa-"):
+                global_data_transfer = 0.15
                 provider_data_transfer = 0.08
+            elif region_code.startswith("asia-"):
+                global_data_transfer = 0.12
+                provider_data_transfer = 0.08
+            elif region_code.startswith("northamerica-"):
+                global_data_transfer = 0.12
+                provider_data_transfer = 0.02
+            elif region_code.startswith("europe-"):
+                global_data_transfer = 0.12
+                provider_data_transfer = 0.02
+            elif region_code.startswith("me-"):
+                global_data_transfer = 0.15
+                provider_data_transfer = 0.08
+            elif region_code.startswith("australia-"):
+                global_data_transfer = 0.19
+                provider_data_transfer = 0.08
+            elif region_code.startswith("southamerica-"):
+                global_data_transfer = 0.19
+                provider_data_transfer = 0.14
             else:
                 raise ValueError(f"Unknown region code {region_code}")
 
@@ -870,50 +887,6 @@ class ProviderRetriever(DataRetriever):
         raise ValueError(f"Could not find compute cost for {current_invocations} invocations")
 
     def get_aws_product_skus(self, price_list_file_json: dict) -> tuple[str, str, str, str, str, str]:
-        """
-        Returns the product UIDs for the invocation and duration of a Lambda function
-
-        architecture: "x86_64" or "arm64"
-        price_list: price list from the AWS Pricing API
-        """
-        invocation_call_sku_arm64 = ""
-        invocation_duration_sku_arm64 = ""
-        invocation_call_sku_x86_64 = ""
-        invocation_duration_sku_x86_64 = ""
-        invocation_call_free_tier_sku = ""
-        invocation_duration_free_tier_sku = ""
-
-        for product in price_list_file_json["products"].values():
-            if (
-                product["attributes"]["group"] == "AWS-Lambda-Requests-ARM"
-                and product["attributes"]["location"] != "Any"
-            ):
-                invocation_call_sku_arm64 = product["sku"]
-            if (
-                product["attributes"]["group"] == "AWS-Lambda-Duration-ARM"
-                and product["attributes"]["location"] != "Any"
-            ):
-                invocation_duration_sku_arm64 = product["sku"]
-            if product["attributes"]["group"] == "AWS-Lambda-Requests" and product["attributes"]["location"] != "Any":
-                invocation_call_sku_x86_64 = product["sku"]
-            if product["attributes"]["group"] == "AWS-Lambda-Duration" and product["attributes"]["location"] != "Any":
-                invocation_duration_sku_x86_64 = product["sku"]
-            if product["attributes"]["group"] == "AWS-Lambda-Requests" and product["attributes"]["location"] == "Any":
-                invocation_call_free_tier_sku = product["sku"]
-            if product["attributes"]["group"] == "AWS-Lambda-Duration" and product["attributes"]["location"] == "Any":
-                invocation_duration_free_tier_sku = product["sku"]
-
-        return (
-            invocation_call_sku_arm64,
-            invocation_duration_sku_arm64,
-            invocation_call_sku_x86_64,
-            invocation_duration_sku_x86_64,
-            invocation_call_free_tier_sku,
-            invocation_duration_free_tier_sku,
-        )
-
-    # TODO: Get GCP SKUs
-    def get_gcp_product_skus(self, price_list_file_json: dict) -> tuple[str, str, str, str, str, str]:
         """
         Returns the product UIDs for the invocation and duration of a Lambda function
 
