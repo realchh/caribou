@@ -18,7 +18,7 @@ from copy import deepcopy
 MAX_FANOUT_NUM = 6
 
 # Change the following bucket name and region to match your setup
-s3_bucket_name = "caribou-video-analytics-naufal"
+s3_bucket_name = "caribou-video-analytics"
 s3_bucket_region_name = "us-east-1"
 
 workflow = CaribouWorkflow(name="video_analytics", version="0.0.2")

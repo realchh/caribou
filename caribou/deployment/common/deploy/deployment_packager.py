@@ -12,10 +12,10 @@ import zipfile
 from typing import Optional
 
 import boto3
+import google.cloud.storage
 import pip
 import yaml
 import zstandard
-import google.cloud.storage
 
 import caribou
 from caribou.common.models.remote_client.remote_client import RemoteClient
@@ -351,7 +351,6 @@ class DeploymentPackager:
             return str(home_region.split(":")[0]).lower()
 
         return "aws"
-
 
 
 def pip_execute(command: str, args: list[str]) -> tuple[bytes, bytes]:

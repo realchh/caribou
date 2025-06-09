@@ -12,7 +12,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Change the following bucket name and region to match your setup
-s3_bucket_name = "caribou-image-processing-benchmark-naufal"
+s3_bucket_name = "caribou-image-processing-benchmark"
 s3_bucket_region_name = "us-east-1"
 
 workflow = CaribouWorkflow(name="image_processing", version="0.0.1")

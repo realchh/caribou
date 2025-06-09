@@ -12,7 +12,7 @@ from pydub import AudioSegment
 from tempfile import TemporaryDirectory
 
 # Change the following bucket name and region to match your setup
-s3_bucket_name = "caribou-text-2-speech-censoring-naufal"
+s3_bucket_name = "caribou-text-2-speech-censoring"
 s3_bucket_region_name = "us-east-1"
 polly_region_name = s3_bucket_region_name # Note AWS Polly is not available in all regions
 

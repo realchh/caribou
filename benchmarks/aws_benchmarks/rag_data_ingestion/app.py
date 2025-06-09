@@ -32,7 +32,7 @@ EXTRACT_IMAGES = True
 desired_region = "us-east-1"
 secrets_manager_region = desired_region
 
-s3_bucket_name = "caribou-document-embedding-benchmark-naufal"
+s3_bucket_name = "caribou-document-embedding-benchmark"
 s3_bucket_region_name = desired_region
 dynamodb_document_table = "caribou-document-embedding-benchmark-document"
 dynamodb_memory_table = "caribou-document-embedding-benchmark-memory"
