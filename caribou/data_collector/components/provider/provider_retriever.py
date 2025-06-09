@@ -24,6 +24,14 @@ def _unit_price_to_float(price: Money) -> float:
     """Convert google.type.Money to a native float (USD)."""
     return float(Decimal(price.units) + Decimal(price.nanos) / Decimal(1e9))
 
+_FIRESTORE_KINDS = {
+    # substrings to match in sku.description → our canonical field name
+    "Document Reads": "read_request_cost",
+    "Document Writes": "write_request_cost",
+    "Stored Data": "storage_cost",
+    # (you can add "Small Ops", "Large Reads", etc. if you need those)
+}
+
 
 class ProviderRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:
@@ -212,21 +220,21 @@ class ProviderRetriever(DataRetriever):
             grouped_by_provider[provider].append(region_key)
 
         for provider, regions in grouped_by_provider.items():
-            try:
-                if provider == Provider.AWS.value:
-                    # provider_data.update(self._retrieve_provider_data_aws(regions))
-                    pass
-                elif provider == Provider.GCP.value:
-                    provider_data.update(self._retrieve_provider_data_gcp(regions))
-                    # pass
-                elif provider in (Provider.TEST_PROVIDER1.value, Provider.TEST_PROVIDER2.value):
-                    pass
-                elif provider == Provider.INTEGRATION_TEST_PROVIDER.value:
-                    provider_data.update(self._retrieve_provider_data_integrationtest(regions))
-                else:
-                    raise NotImplementedError(f"Provider {provider} not implemented")
-            except Exception as e:  # pylint: disable=broad-except
-                print(f"Error while retrieving provider data for {provider}: {e}")
+            # try:
+            if provider == Provider.AWS.value:
+                # provider_data.update(self._retrieve_provider_data_aws(regions))
+                pass
+            elif provider == Provider.GCP.value:
+                provider_data.update(self._retrieve_provider_data_gcp(regions))
+                # pass
+            elif provider in (Provider.TEST_PROVIDER1.value, Provider.TEST_PROVIDER2.value):
+                pass
+            elif provider == Provider.INTEGRATION_TEST_PROVIDER.value:
+                provider_data.update(self._retrieve_provider_data_integrationtest(regions))
+            else:
+                raise NotImplementedError(f"Provider {provider} not implemented")
+            # except Exception as e:  # pylint: disable=broad-except
+            #     print(f"Error while retrieving provider data for {provider}: {e}")
 
         return provider_data
 
@@ -261,13 +269,13 @@ class ProviderRetriever(DataRetriever):
 
     def _retrieve_provider_data_gcp(self, gcp_regions: list[str]) -> dict[str, Any]:
         transmission_cost_dict = self._retrieve_gcp_transmission_cost(gcp_regions)
-
+        print("one")
         execution_cost_dict = self._retrieve_gcp_execution_cost(gcp_regions)
-
+        print("two")
         pubsub_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
-        #
-        # dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
-        #
+        print("three")
+        dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
+        print("four")
         # ecr_cost_dict = self._retrieve_gcp_artifact_registry_cost(gcp_regions)
 
         return {
@@ -532,6 +540,52 @@ class ProviderRetriever(DataRetriever):
 
         return dynamodb_cost_dict
 
+    def _retrieve_gcp_firestore_cost(self, available_region: list[str]) -> dict[str, Any]:
+        client = billing_v1.CloudCatalogClient()
+
+        firestore_svc = None
+        for svc in client.list_services():
+            if "firestore" in svc.display_name.lower():
+                firestore_svc = svc
+                break
+
+        available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
+
+        bucket = defaultdict(lambda: {
+            "read_request_cost": 0.0, # USD per 100,000 reads
+            "write_request_cost": 0.0, # USD per 100,000 writes
+            "storage_cost": 0.0, # USD per gigabyte per month
+            "unit": "USD",
+        })
+
+        for sku in client.list_skus(parent=firestore_svc.name):
+            if any(bad in sku.description for bad in ("Backup", "Data Transfer", "Enterprise", "(with free tier)")):
+                continue
+
+            if sku.category.resource_group == "FirestoreStorage":
+                kind = "storage_cost"
+            elif sku.category.resource_group == "FirestoreEntityPutOps":
+                kind = "write_request_cost"
+            elif sku.category.resource_group == "FirestoreReadOps":
+                kind = "read_request_cost"
+            else:
+                continue
+
+            region_codes = sku.geo_taxonomy.regions
+
+            available_regions = [r for r in region_codes if r in available_region_code]
+            if not available_regions:
+                continue
+
+            pricing_expression = sku.pricing_info[0].pricing_expression
+            price = _unit_price_to_float(pricing_expression.tiered_rates[0].unit_price)
+
+            for r in available_regions:
+                region_code = available_region_code[r]
+                bucket[region_code][kind] = price
+
+        return dict(bucket)
+
     def get_dynamodb_on_demand_skus(self, price_list_file_json: dict[str, Any]) -> tuple[str, str, str]:
         read_request_sku = ""
         write_request_sku = ""
@@ -685,7 +739,6 @@ class ProviderRetriever(DataRetriever):
                 raise ValueError(f"Invalid region key {region_key}")
 
             region_code = region_key.split(":")[1]
-            print(region_code)
             # Check if the region code is in the dictionary
             if region_code in exact_region_codes:
                 global_data_transfer, provider_data_transfer = exact_region_codes[region_code]
@@ -831,9 +884,9 @@ class ProviderRetriever(DataRetriever):
         cloud_run_svc = next(
             s for s in client.list_services() if s.display_name == "Cloud Run Functions"
         )
-        # print(cloud_run_svc)
+
         skus = client.list_skus(parent=cloud_run_svc.name)
-        # print(skus)
+
         available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
 
         data_by_region = defaultdict(
@@ -851,7 +904,7 @@ class ProviderRetriever(DataRetriever):
 
             pricing_expression = sku.pricing_info[0].pricing_expression
             unit = pricing_expression.usage_unit
-            # print(unit)
+
             if unit not in {"s", "GiBy.s"}:
                 continue
 
