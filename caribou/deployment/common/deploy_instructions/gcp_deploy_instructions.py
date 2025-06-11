@@ -1,6 +1,5 @@
 from typing import Optional
 
-from caribou.common.provider import Provider
 from caribou.deployment.common.deploy.models.iam_role import IAMRole
 from caribou.deployment.common.deploy.models.instructions import APICall, Instruction
 from caribou.deployment.common.deploy.models.variable import Variable
@@ -8,9 +7,6 @@ from caribou.deployment.common.deploy_instructions.deploy_instructions import De
 
 
 class GCPDeployInstructions(DeployInstructions):
-    def __init__(self, region: str, provider: Provider) -> None:
-        super().__init__(region, provider)
-
     def _get_create_iam_role_instruction(self, role: IAMRole, iam_role_varname: str) -> Instruction:
         # In GCP we normally create a service account and attach roles
         return APICall(

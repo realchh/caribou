@@ -22,6 +22,7 @@ from google.cloud import (
     run_v2,
     scheduler_v1,
     storage,
+    resourcemanager_v3
 )
 from google.cloud.iam_admin_v1 import IAMClient
 from google.cloud.iam_admin_v1 import types as iam_admin_types
@@ -44,11 +45,7 @@ from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str
 from caribou.deployment.common.deploy.models.resource import Resource
 
-# from boto3.session import Session
-
-
 logger = logging.getLogger(__name__)
-
 
 # pylint: disable=too-many-lines
 class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
@@ -85,6 +82,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._eventarc_client = eventarc_v1.EventarcClient(credentials=self._credentials)
         self._artifact_registry_client = artifactregistry_v1.ArtifactRegistryClient(credentials=self._credentials)
         self._iam_admin_client = IAMClient(credentials=self._credentials)
+        self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
 
         self._client_cache: dict[str, Any] = {}
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
@@ -96,11 +94,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def get_current_provider_region(self) -> str:
         return f"gcp_{self._region}"
 
-    def get_service_account(self, role_name: str) -> str:
-        full_account_name = f"projects/{self._project_id}/serviceAccounts/{role_name}"
+    def get_service_account(self, name: str) -> str:
+        full_account_name = f"projects/{self._project_id}/serviceAccounts/{name}"
 
         service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
-        return service_account_object["email"]
+        return service_account_object.email
 
     def get_cloud_run_service(self, service_name: str) -> dict[str, Any] | None:
         """
@@ -363,9 +361,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_size: int,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
+        image_uri: str
         deployed_image_uri = self._get_deployed_image_uri(function_name)
-        if len(deployed_image_uri) > 0:
-            image_uri = self._copy_image_to_region(deployed_image_uri)
+        if deployed_image_uri:
+            image_uri = deployed_image_uri
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function creation")
@@ -387,95 +386,62 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 image_name = f"{function_name.lower()}:latest"
                 self._build_docker_image(tmpdirname, image_name)
 
-                # Step 4: Upload the Image to ECR
-                image_uri = self._upload_image_to_ecr(image_name)
+                # Step 4: Upload the Image to Artifact Registry
+                image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
-        kwargs: dict[str, Any] = {
-            "FunctionName": function_name,
-            "Code": {"ImageUri": image_uri},
-            "PackageType": "Image",
-            "Role": role_identifier,
-            "Environment": {"Variables": environment_variables},
-            "MemorySize": memory_size,
-        }
-        if timeout >= 1:
-            kwargs["Timeout"] = timeout
-        arn, state = self._create_lambda_function(kwargs)
+        service_account_email = self.get_service_account(role_identifier)
 
-        if state != "Active":
-            self._wait_for_function_to_become_active(function_name)
+        service_url = self._create_cloud_run_service(
+            service_name = function_name,
+            image_uri = image_uri,
+            env = environment_variables,
+            cpu = 1.0,
+            memory_mib = memory_size,
+            timeout_s = timeout,
+            service_account_email = service_account_email,
+        )
 
-        return arn
+        return service_url
 
-    # TODO: deploy to artifact registry
-    def _copy_image_to_region(self, deployed_image_uri: str) -> str:
-        parts = deployed_image_uri.split("/")
-        original_region = parts[0].split(".")[3]
-        original_image_name = parts[1]
+    def _create_cloud_run_service(self, service_name: str, image_uri: str, env: dict[str, str],
+                                  cpu: float, memory_mib: int, timeout_s: int, service_account_email: str) -> str:
+        client = self._run_client
+        parent = f"projects/{self._project_id}/locations/{self._region}"
+        full_name = f"{parent}/services/{service_name}"
 
-        ecr_client = self._client("ecr")
-        new_region = ecr_client.meta.region_name
-        new_image_name = original_image_name.replace(original_region, new_region)
+        container = run_v2.Container()
+        container.image = image_uri
+        container.env = [run_v2.EnvVar({"name": k, "value": v}) for k, v in env.items()]
+        container.resources = run_v2.ResourceRequirements(limits = {"cpu": str(cpu), "memory": f"{memory_mib}Mi"})
 
-        # Assume AWS CLI is configured. Customize these commands based on your AWS setup.
-        repository_name = new_image_name.split(":")[0]
+        template = run_v2.RevisionTemplate({
+            "max_instance_request_concurrency": 80,
+            "containers": [container],
+            "timeout_seconds": timeout_s,
+            "service_account": service_account_email,
+            "scaling": run_v2.RevisionScaling({"min_instance_count": 0, "max_instance_count": 100}),
+            }
+        )
+
+        traffic_target = run_v2.TrafficTarget()
+        traffic_target.percent = 100
+        traffic_target.latest_revision = True
+
+        svc = run_v2.Service()
+
+        svc.name = full_name
+        svc.template = template
+        svc.traffic = [traffic_target]
+
         try:
-            ecr_client.create_repository(repositoryName=repository_name)
-        except ecr_client.exceptions.RepositoryAlreadyExistsException:
-            pass  # Repository already exists, proceed
+            op = client.create_service(parent=parent, service=svc, service_id=service_name)
+            logger.info("Cloud Run service %s created successfully.", service_name)
+        except google_api_exceptions.AlreadyExists:
+            op = client.update_service(service = svc)
 
-        account_id = self._client("sts").get_caller_identity().get("Account")
-
-        original_ecr_registry = f"{account_id}.dkr.ecr.{original_region}.amazonaws.com"
-        ecr_registry = f"{account_id}.dkr.ecr.{new_region}.amazonaws.com"
-
-        new_image_uri = f"{ecr_registry}/{new_image_name}"
-
-        login_password_original = (
-            subprocess.check_output(["aws", "--region", original_region, "ecr", "get-login-password"])
-            .strip()
-            .decode("utf-8")
-        )
-        login_password_new = (
-            subprocess.check_output(["aws", "--region", new_region, "ecr", "get-login-password"])
-            .strip()
-            .decode("utf-8")
-        )
-
-        # Use /tmp directory which is writable in AWS Lambda
-        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
-            # Force environment variables to use the temporary directory
-            env = os.environ.copy()
-            env["HOME"] = temp_dir
-            env["XDG_CACHE_HOME"] = os.path.join(temp_dir, ".cache")
-            env["XDG_CONFIG_HOME"] = os.path.join(temp_dir, ".config")
-            env["XDG_DATA_HOME"] = os.path.join(temp_dir, ".local", "share")
-
-            print(f"Using crane to copy image from {original_ecr_registry} to {ecr_registry}")
-            try:
-                subprocess.run(
-                    ["crane", "auth", "login", original_ecr_registry, "-u", "AWS", "-p", login_password_original],
-                    cwd=temp_dir,
-                    env=env,  # Use the modified environment variables
-                    check=True,
-                )
-                subprocess.run(
-                    ["crane", "auth", "login", ecr_registry, "-u", "AWS", "-p", login_password_new],
-                    cwd=temp_dir,
-                    env=env,  # Use the modified environment variables
-                    check=True,
-                )
-                subprocess.run(
-                    ["crane", "cp", deployed_image_uri, new_image_uri],
-                    cwd=temp_dir,
-                    env=env,  # Use the modified environment variables
-                    check=True,
-                )
-                logger.info("Docker image %s copied successfully.", new_image_uri)
-            except subprocess.CalledProcessError as e:
-                logger.error("Failed to copy Docker image %s. Error: %s", new_image_uri, e)
-            return new_image_uri
+        op.result()
+        return client.get_service(name=full_name).uri
 
     # TODO: move from dynamodb to firestore, logic does not need much changes
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
@@ -545,20 +511,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         if len(run_command) > 0:
             run_command = f"RUN {run_command}"
 
-        # For AWS lambda insights for CPU and IO logging
-        # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights-Getting-Started-docker.html
-        lambda_insight_command = (
-            """RUN curl -O https://lambda-insights-extension.s3-ap-northeast-1.amazonaws.com/amazon_linux/lambda-insights-extension.rpm && """  # pylint: disable=line-too-long
-            """rpm -U lambda-insights-extension.rpm && """
-            """rm -f lambda-insights-extension.rpm"""
-        )
-
         return f"""
-        FROM public.ecr.aws/lambda/{runtime.replace("python", "python:")}
         COPY requirements.txt ./
-        {lambda_insight_command}
         {run_command}
         RUN pip3 install --no-cache-dir -r requirements.txt
+        ENV ENABLE_PROFILER="true"
         COPY app.py ./
         COPY src ./src
         COPY caribou ./caribou
@@ -574,38 +531,52 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             # This will catch errors from the subprocess and logger.info a message.
             logger.error("Failed to build Docker image %s. Error: %s", image_name, e)
 
-    # TODO: change this to deploy to artifact registry
-    def _upload_image_to_ecr(self, image_name: str) -> str:
-        ecr_client = self._client("ecr")
-        # Assume AWS CLI is configured. Customize these commands based on your AWS setup.
-        repository_name = image_name.split(":")[0]
-        try:
-            ecr_client.create_repository(repositoryName=repository_name)
-        except ecr_client.exceptions.RepositoryAlreadyExistsException:
-            pass  # Repository already exists, proceed
-
-        # Retrieve an authentication token and authenticate your Docker client to your registry.
-        # Use the AWS CLI 'get-login-password' command to get the token.
-        account_id = self._client("sts").get_caller_identity().get("Account")
-        region = self._client("ecr").meta.region_name
-        ecr_registry = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
-
-        login_password = (
-            subprocess.check_output(["aws", "--region", region, "ecr", "get-login-password"]).strip().decode("utf-8")
+    def _ensure_repository(self, repository_name: str) -> str:
+        """
+        Returns the full resource name of the repository (if exists). If it doesn't exist, it will be created.
+        """
+        repository_name = repository_name.lower()
+        client = self._artifact_registry_client
+        full_repo = client.repository_path(
+            project=self._project_id,
+            location=self._region,
+            repository=repository_name,
         )
-        subprocess.run(["docker", "login", "--username", "AWS", "--password", login_password, ecr_registry], check=True)
 
-        # Tag and push the image to ECR
-        image_uri = f"{ecr_registry}/{repository_name}:latest"
         try:
-            subprocess.run(["docker", "tag", image_name, image_uri], check=True)
-            subprocess.run(["docker", "push", image_uri], check=True)
-            logger.info("Successfully pushed Docker image %s to ECR.", image_uri)
-        except subprocess.CalledProcessError as e:
-            logger.error("Failed to push Docker image %s to ECR. Error: %s", image_name, e)
-            raise
+            client.get_repository(name=full_repo)
+        except google_api_exceptions.NotFound:
+            repository = artifactregistry_v1.Repository()
+            repository.format_=artifactregistry_v1.Repository.Format.DOCKER
+            repository.description="Caribou build artifacts"
+            client.create_repository(
+                parent=f"projects/{self._project_id}/locations/{self._region}",
+                repository_id=repository_name,
+                repository=repository
+            )
 
-        return image_uri
+        return full_repo
+
+    def _upload_image_to_artifact_registry(self, image_name: str) -> str:
+        repo_id = "caribou" # Base artifact registry repo to hold the docker images used for deployment
+        self._ensure_repository(repo_id)
+
+        host = f"{self._region}-docker.pkg.dev"
+        image_path = f"{host}/{self._project_id}/{repo_id}"
+
+        name, tag = (image_name.split(":", 1) + ["latest"])[:2]
+        remote = f"{image_path}/{name}:{tag}"
+
+        subprocess.run(
+            ["gcloud", "auth", "configure-docker", host, "--quiet"],
+            check=True,
+        )
+
+        subprocess.run(["docker", "tag", image_name, remote], check=True)
+        subprocess.run(["docker", "push", remote], check=True)
+
+        logging.info("Pushed image %s", remote)
+        return remote
 
     def update_function(
         self,
@@ -620,9 +591,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         deployed_image_uri = self._get_deployed_image_uri(function_name)
-        client = self._client("lambda")
-        if len(deployed_image_uri) > 0:
-            image_uri = self._copy_image_to_region(deployed_image_uri)
+        if deployed_image_uri:
+            image_uri = deployed_image_uri
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function update")
@@ -642,57 +612,72 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
                 image_name = f"{function_name.lower()}:latest"
                 self._build_docker_image(tmpdirname, image_name)
-                image_uri = self._upload_image_to_ecr(image_name)
+                image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
-        response = client.update_function_code(FunctionName=function_name, ImageUri=image_uri)
+        service_account_email = self.get_service_account(role_identifier)
 
-        time.sleep(self.DELAY_TIME)
-        if response.get("State") != "Active":
-            self._wait_for_function_to_become_active(function_name)
+        service_url = self._create_cloud_run_service(
+            service_name=function_name,
+            image_uri=image_uri,
+            env=environment_variables,
+            cpu=1.0,
+            memory_mib=memory_size,
+            timeout_s=timeout,
+            service_account_email=service_account_email,
+        )
 
-        kwargs = {
-            "FunctionName": function_name,
-            "Role": role_identifier,
-            "Environment": {"Variables": environment_variables},
-            "MemorySize": memory_size,
-        }
-        if timeout >= 1:
-            kwargs["Timeout"] = timeout
-
-        try:
-            response = client.update_function_configuration(**kwargs)
-        except ClientError as e:
-            logger.error("Error while updating function configuration: %s", e)
-
-        if response.get("State") != "Active":
-            self._wait_for_function_to_become_active(function_name)
-
-        return response["FunctionArn"]
+        return service_url
 
     def create_role(self, role_name: str, policy: str, trust_policy: dict) -> str:
-        if len(role_name) > 64:
-            role_name = role_name[:64]
-        client = self._client("iam")
-        response = client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust_policy))
-        self.put_role_policy(role_name=role_name, policy_name=role_name, policy_document=policy)
+        """
 
-        time.sleep(self.DELAY_TIME * 2)  # Wait for role to become active
-        return response["Role"]["Arn"]
+        """
+        policy_list = json.loads(policy)
+        if "gcp" not in policy_list or "roles" not in policy_list["gcp"]:
+            raise ValueError("Policy must contain 'gcp' and 'roles'")
 
-    def _wait_for_role_to_become_active(self, role_name: str) -> None:
-        client = self._client("iam")
-        for _ in range(self.FUNCTION_CREATE_ATTEMPTS):
-            response = client.get_role(RoleName=role_name)
-            state = response["Role"]["State"]
-            if state == "Active":
-                return
-            time.sleep(self.DELAY_TIME)
-        raise RuntimeError(f"Role {role_name} did not become active")
+        roles = policy_list["gcp"]["roles"]
 
-    def put_role_policy(self, role_name: str, policy_name: str, policy_document: str) -> None:
-        client = self._client("iam")
-        client.put_role_policy(RoleName=role_name, PolicyName=policy_name, PolicyDocument=policy_document)
+        client = self._iam_admin_client
+        project_client = self._resource_manager_client
+
+        service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
+        service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
+
+        try:
+            client.get_service_account(name=service_account_name)
+            print("Service account found: ", service_account_email)
+        except google_api_exceptions.NotFound:
+            client.create_service_account(
+                name = f"projects/{self._project_id}",
+                account_id=role_name,
+                service_account=iam_admin_v1.ServiceAccount({"display_name": role_name}),
+            )
+            print("Created service account: ", service_account_email)
+
+        project_policy = project_client.get_iam_policy(resource=f"projects/{self._project_id}")
+
+        policy_member = f"serviceAccount:{service_account_email}"
+        existing_roles = {binding.role for binding in project_policy.bindings if policy_member in binding.members}
+        for role in roles:
+            if role in existing_roles:
+                continue
+
+            binding_found = False
+            for binding in project_policy.bindings:
+                if binding.role == role:
+                    binding_found = True
+                    binding.members.append(policy_member)
+
+            if not binding_found:
+                project_policy.bindings.add(role=role, members=[policy_member])
+
+        project_client.set_iam_policy(
+            request={"resource": f"projects/{self._project_id}",
+                     "policy": project_policy}
+        )
+        return service_account_email
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict) -> str:
         client = self._client("iam")
@@ -710,26 +695,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust_policy))
         except ClientError:
             client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust_policy))
-        try:
-            return self.get_service_account(role_name)
-        except ClientError:
-            self._wait_for_role_to_become_active(role_name)
-            return self.get_service_account(role_name)
 
-    def _create_lambda_function(self, kwargs: dict[str, Any]) -> tuple[str, str]:
-        client = self._client("lambda")
-        response = client.create_function(**kwargs)
-        return response["FunctionArn"], response["State"]
-
-    def _wait_for_function_to_become_active(self, function_name: str) -> None:
-        client = self._client("lambda")
-        for _ in range(self.FUNCTION_CREATE_ATTEMPTS):
-            response = client.get_function(FunctionName=function_name)
-            state = response["Configuration"]["State"]
-            if state == "Active":
-                return
-            time.sleep(self.DELAY_TIME)
-        raise RuntimeError(f"Lambda function {function_name} did not become active")
+        return self.get_service_account(role_name)
 
     # TODO: Create pubsub topic
     def create_sns_topic(self, topic_name: str) -> str:
@@ -739,15 +706,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return response["name"]
 
     # TODO: create pubsub subscription
-    def subscribe_sns_topic(self, topic_arn: str, protocol: str, endpoint: str) -> None:
-        client = self._pubsub_publisher_client
-        response = client.subscribe(
-            TopicArn=topic_arn,
-            Protocol=protocol,
-            Endpoint=endpoint,
-            ReturnSubscriptionArn=True,
-        )
-        return response["SubscriptionArn"]
+    def subscribe_sns_topic(self, topic_path: str, subscription_name) -> None:
+        client = self._pubsub_subscriber_client
+        response = client.create_subscription(name = subscription_name, topic = topic_path)
+        return response["name"]
 
     def add_pubsub_permission_for_cloud_run(self, service_name: str) -> None:
         client = self._run_client
@@ -1105,7 +1067,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._build_docker_image(tmpdirname, image_name)
 
         # Step 4: Upload the Image to ECR
-        image_uri = self._upload_image_to_ecr(image_name)
+        image_uri = self._upload_image_to_artifact_registry(image_name)
         self._create_framework_lambda_function(
             function_name, image_uri, role_arn, timeout, memory_size, ephemeral_storage
         )
@@ -1309,3 +1271,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         lambda_client.invoke(
             FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
         )
+
+if __name__ == "__main__":
+    gcp_remote_client = GCPRemoteClient(project_id="caribou-460422", region="us-east1")
+    print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
+    iam_policy = """
+    {
+      "gcp": {
+        "roles": [
+          "roles/logging.logWriter",
+          "roles/pubsub.publisher"
+        ]
+      }
+    }
+    """
+
+    sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
+    print("SA email:", sa)

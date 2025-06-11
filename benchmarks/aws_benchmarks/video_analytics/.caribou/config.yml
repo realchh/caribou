@@ -1,5 +1,5 @@
 workflow_name: "video_analytics"
-workflow_version: "0.0.2"
+workflow_version: "0.0.1"
 iam_policy_file: "iam_policy.json"
 home_region:
   provider: "aws"

@@ -1,4 +1,5 @@
 from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
+from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClient
 from caribou.common.models.remote_client.integration_test_remote_client import IntegrationTestRemoteClient
 from caribou.common.models.remote_client.mock_remote_client import MockRemoteClient
 from caribou.common.models.remote_client.remote_client import RemoteClient
@@ -15,7 +16,7 @@ class RemoteClientFactory:
         if provider_enum == Provider.AWS:
             return AWSRemoteClient(region)
         if provider_enum == Provider.GCP:
-            raise NotImplementedError()
+            return GCPRemoteClient(region)
         if provider_enum in [Provider.TEST_PROVIDER1, Provider.TEST_PROVIDER2]:
             return MockRemoteClient()
         if provider_enum == Provider.INTEGRATION_TEST_PROVIDER:
