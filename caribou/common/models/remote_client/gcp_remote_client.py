@@ -630,9 +630,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return service_url
 
     def create_role(self, role_name: str, policy: str, trust_policy: dict) -> str:
-        """
-
-        """
         policy_list = json.loads(policy)
         if "gcp" not in policy_list or "roles" not in policy_list["gcp"]:
             raise ValueError("Policy must contain 'gcp' and 'roles'")
@@ -647,7 +644,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         try:
             client.get_service_account(name=service_account_name)
-            print("Service account found: ", service_account_email)
         except google_api_exceptions.NotFound:
             client.create_service_account(
                 name = f"projects/{self._project_id}",
@@ -677,26 +673,57 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             request={"resource": f"projects/{self._project_id}",
                      "policy": project_policy}
         )
-        return service_account_email
+        return self.get_service_account(service_account_email)
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict) -> str:
-        client = self._client("iam")
-        try:
-            current_role_policy = client.get_role_policy(RoleName=role_name, PolicyName=role_name)
-            if current_role_policy["PolicyDocument"] != policy:
-                client.delete_role_policy(RoleName=role_name, PolicyName=role_name)
-                self.put_role_policy(role_name=role_name, policy_name=role_name, policy_document=policy)
-        except ClientError:
-            self.put_role_policy(role_name=role_name, policy_name=role_name, policy_document=policy)
-        try:
-            current_trust_policy = client.get_role(RoleName=role_name)["Role"]["AssumeRolePolicyDocument"]
-            if current_trust_policy != trust_policy:
-                client.delete_role(RoleName=role_name)
-                client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust_policy))
-        except ClientError:
-            client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust_policy))
+        policy_list = json.loads(policy)
+        if "gcp" not in policy_list or "roles" not in policy_list["gcp"]:
+            raise ValueError("Policy must contain 'gcp' and 'roles'")
 
-        return self.get_service_account(role_name)
+        roles = policy_list["gcp"]["roles"]
+
+        client = self._iam_admin_client
+        project_client = self._resource_manager_client
+
+        service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
+        service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
+
+        try:
+            client.get_service_account(name=service_account_name)
+        except google_api_exceptions.NotFound:
+            client.create_service_account(
+                name = f"projects/{self._project_id}",
+                account_id=role_name,
+                service_account=iam_admin_v1.ServiceAccount({"display_name": role_name}),
+            )
+            print("Created service account: ", service_account_email)
+
+        project_policy = project_client.get_iam_policy(resource=f"projects/{self._project_id}")
+
+        policy_member = f"serviceAccount:{service_account_email}"
+
+        existing_roles = {binding.role: binding for binding in project_policy.bindings if policy_member in binding.members}
+
+        print("desired roles: ", set(roles))
+        print("existing roles: ", existing_roles)
+        for role in set(roles) - existing_roles.keys():
+            b = next((bind for bind in project_policy.bindings if bind.role == bind), None)
+            if b:
+                b.members.append(policy_member)
+            else:
+                project_policy.bindings.add(role=role, members=[policy_member])
+
+        for obsolete in existing_roles.keys() - set(roles):
+            bind = existing_roles[obsolete]
+            bind.members.remove(policy_member)
+            if not bind.members:
+                project_policy.bindings.remove(bind)
+
+        project_client.set_iam_policy(
+            request={"resource": f"projects/{self._project_id}",
+                     "policy": project_policy}
+        )
+        return self.get_service_account(service_account_email)
 
     # TODO: Create pubsub topic
     def create_sns_topic(self, topic_name: str) -> str:
@@ -1286,5 +1313,16 @@ if __name__ == "__main__":
     }
     """
 
+    iam_policy_2 = """
+    {
+      "gcp": {
+        "roles": [
+          "roles/logging.logWriter"
+        ]
+      }
+    }
+    """
+
     sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
-    print("SA email:", sa)
+    sa = gcp_remote_client.update_role("caribou-runtime", iam_policy_2, {})
+    print("SA:", sa)
