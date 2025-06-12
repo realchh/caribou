@@ -19,10 +19,10 @@ from google.cloud import (
     iam_admin_v1,
     logging_v2,
     pubsub_v1,
+    resourcemanager_v3,
     run_v2,
     scheduler_v1,
     storage,
-    resourcemanager_v3
 )
 from google.cloud.iam_admin_v1 import IAMClient
 from google.cloud.iam_admin_v1 import types as iam_admin_types
@@ -47,7 +47,9 @@ from caribou.deployment.common.deploy.models.resource import Resource
 
 logger = logging.getLogger(__name__)
 
+
 # pylint: disable=too-many-lines
+# pylint: disable=too-many-instance-attributes
 class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     FUNCTION_CREATE_ATTEMPTS = 30
     DELAY_TIME = 5
@@ -164,8 +166,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             project=self._project_id, location=self._region, service=service_name
         )
         try:
-            request = run_v2.GetServiceRequest(name=full_service_name)
-            service_object = self._run_client.get_service(request=request)
+            service_object = self._run_client.get_service(name=full_service_name)
             return service_object
         except google_api_exceptions.NotFound:
             return None
@@ -393,19 +394,27 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         service_account_email = self.get_service_account(role_identifier)
 
         service_url = self._create_cloud_run_service(
-            service_name = function_name,
-            image_uri = image_uri,
-            env = environment_variables,
-            cpu = 1.0,
-            memory_mib = memory_size,
-            timeout_s = timeout,
-            service_account_email = service_account_email,
+            service_name=function_name,
+            image_uri=image_uri,
+            env=environment_variables,
+            cpu=1.0,
+            memory_mib=memory_size,
+            timeout_s=timeout,
+            service_account_email=service_account_email,
         )
 
         return service_url
 
-    def _create_cloud_run_service(self, service_name: str, image_uri: str, env: dict[str, str],
-                                  cpu: float, memory_mib: int, timeout_s: int, service_account_email: str) -> str:
+    def _create_cloud_run_service(
+        self,
+        service_name: str,
+        image_uri: str,
+        env: dict[str, str],
+        cpu: float,
+        memory_mib: int,
+        timeout_s: int,
+        service_account_email: str,
+    ) -> str:
         client = self._run_client
         parent = f"projects/{self._project_id}/locations/{self._region}"
         full_name = f"{parent}/services/{service_name}"
@@ -413,14 +422,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         container = run_v2.Container()
         container.image = image_uri
         container.env = [run_v2.EnvVar({"name": k, "value": v}) for k, v in env.items()]
-        container.resources = run_v2.ResourceRequirements(limits = {"cpu": str(cpu), "memory": f"{memory_mib}Mi"})
+        container.resources = run_v2.ResourceRequirements(limits={"cpu": str(cpu), "memory": f"{memory_mib}Mi"})
 
-        template = run_v2.RevisionTemplate({
-            "max_instance_request_concurrency": 80,
-            "containers": [container],
-            "timeout_seconds": timeout_s,
-            "service_account": service_account_email,
-            "scaling": run_v2.RevisionScaling({"min_instance_count": 0, "max_instance_count": 100}),
+        template = run_v2.RevisionTemplate(
+            {
+                "max_instance_request_concurrency": 80,
+                "containers": [container],
+                "timeout_seconds": timeout_s,
+                "service_account": service_account_email,
+                "scaling": run_v2.RevisionScaling({"min_instance_count": 0, "max_instance_count": 100}),
             }
         )
 
@@ -438,7 +448,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             op = client.create_service(parent=parent, service=svc, service_id=service_name)
             logger.info("Cloud Run service %s created successfully.", service_name)
         except google_api_exceptions.AlreadyExists:
-            op = client.update_service(service = svc)
+            op = client.update_service(service=svc)
 
         op.result()
         return client.get_service(name=full_name).uri
@@ -547,18 +557,18 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             client.get_repository(name=full_repo)
         except google_api_exceptions.NotFound:
             repository = artifactregistry_v1.Repository()
-            repository.format_=artifactregistry_v1.Repository.Format.DOCKER
-            repository.description="Caribou build artifacts"
+            repository.format_ = artifactregistry_v1.Repository.Format.DOCKER
+            repository.description = "Caribou build artifacts"
             client.create_repository(
                 parent=f"projects/{self._project_id}/locations/{self._region}",
                 repository_id=repository_name,
-                repository=repository
+                repository=repository,
             )
 
         return full_repo
 
     def _upload_image_to_artifact_registry(self, image_name: str) -> str:
-        repo_id = "caribou" # Base artifact registry repo to hold the docker images used for deployment
+        repo_id = "caribou"  # Base artifact registry repo to hold the docker images used for deployment
         self._ensure_repository(repo_id)
 
         host = f"{self._region}-docker.pkg.dev"
@@ -646,11 +656,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             client.get_service_account(name=service_account_name)
         except google_api_exceptions.NotFound:
             client.create_service_account(
-                name = f"projects/{self._project_id}",
+                name=f"projects/{self._project_id}",
                 account_id=role_name,
                 service_account=iam_admin_v1.ServiceAccount({"display_name": role_name}),
             )
-            print("Created service account: ", service_account_email)
+            time.sleep(3)
 
         project_policy = project_client.get_iam_policy(resource=f"projects/{self._project_id}")
 
@@ -669,10 +679,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             if not binding_found:
                 project_policy.bindings.add(role=role, members=[policy_member])
 
-        project_client.set_iam_policy(
-            request={"resource": f"projects/{self._project_id}",
-                     "policy": project_policy}
-        )
+        project_client.set_iam_policy(request={"resource": f"projects/{self._project_id}", "policy": project_policy})
         return self.get_service_account(service_account_email)
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict) -> str:
@@ -691,21 +698,16 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         try:
             client.get_service_account(name=service_account_name)
         except google_api_exceptions.NotFound:
-            client.create_service_account(
-                name = f"projects/{self._project_id}",
-                account_id=role_name,
-                service_account=iam_admin_v1.ServiceAccount({"display_name": role_name}),
-            )
-            print("Created service account: ", service_account_email)
+            return self.create_role(role_name, policy, trust_policy)
 
         project_policy = project_client.get_iam_policy(resource=f"projects/{self._project_id}")
 
         policy_member = f"serviceAccount:{service_account_email}"
 
-        existing_roles = {binding.role: binding for binding in project_policy.bindings if policy_member in binding.members}
+        existing_roles = {
+            binding.role: binding for binding in project_policy.bindings if policy_member in binding.members
+        }
 
-        print("desired roles: ", set(roles))
-        print("existing roles: ", existing_roles)
         for role in set(roles) - existing_roles.keys():
             b = next((bind for bind in project_policy.bindings if bind.role == bind), None)
             if b:
@@ -719,23 +721,59 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             if not bind.members:
                 project_policy.bindings.remove(bind)
 
-        project_client.set_iam_policy(
-            request={"resource": f"projects/{self._project_id}",
-                     "policy": project_policy}
-        )
+        project_client.set_iam_policy(request={"resource": f"projects/{self._project_id}", "policy": project_policy})
         return self.get_service_account(service_account_email)
 
-    # TODO: Create pubsub topic
-    def create_sns_topic(self, topic_name: str) -> str:
+    def remove_role(self, role_name: str) -> None:
+        client = self._resource_manager_client
+
+        service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
+        policy_member = f"serviceAccount:{service_account_email}"
+        service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
+
+        try:
+            project_policy = client.get_iam_policy(resource=f"projects/{self._project_id}")
+            policy_changed = False
+
+            for i in range(len(project_policy.bindings) - 1, -1, -1):
+                binding = project_policy.bindings[i]
+
+                if policy_member in binding.members:
+                    binding.members.remove(policy_member)
+                    policy_changed = True
+
+                if not binding.members:
+                    del project_policy.bindings[i]
+
+            if policy_changed:
+                client.set_iam_policy(request={"resource": f"projects/{self._project_id}", "policy": project_policy})
+
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Could not delete member from IAM Role {e}") from e
+
+        time.sleep(3) # wait until gcp updates the roles
+
+        try:
+            iam_client = self._iam_admin_client
+            iam_client.delete_service_account(name=service_account_name)
+        except google_api_exceptions.NotFound:
+            raise RuntimeError(f"Service account {service_account_email} not found")
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Failed to delete service account {service_account_email} from IAM Role {e}") from e
+
+    def create_pubsub_topic(self, topic_name: str) -> str:
         client = self._pubsub_publisher_client
         # If topic exists, the following will return the existing topic
-        response = client.create_topic(name=topic_name)
+        topic_path = client.topic_path(self._project_id, topic_name)
+        try:
+            response = client.create_topic(name=topic_path)
+        except google_api_exceptions.AlreadyExists:
+            return topic_path
         return response["name"]
 
-    # TODO: create pubsub subscription
-    def subscribe_sns_topic(self, topic_path: str, subscription_name) -> None:
+    def subscribe_pubsub_topic(self, topic_path: str, subscription_name) -> None:
         client = self._pubsub_subscriber_client
-        response = client.create_subscription(name = subscription_name, topic = topic_path)
+        response = client.create_subscription(name=subscription_name, topic=topic_path)
         return response["name"]
 
     def add_pubsub_permission_for_cloud_run(self, service_name: str) -> None:
@@ -745,7 +783,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         invoker_member = f"serviceAccount:service-{self._project_id}@gcp-sa-pubsub.iam.gserviceaccount.com"
 
         for binding in policy.bindings:
-            if binding["role"] == "roles/run.invoker" and invoker_member in binding["members"]:
+            if binding.role == "roles/run.invoker" and invoker_member in binding.members:
                 return
 
         policy.bindings.append({"role": "roles/run.invoker", "members": [invoker_member]})
@@ -832,37 +870,37 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         doc = client.collection(table_name).document(key).get()
         return doc.exists
 
-    # TODO: upload resource to google cloud storage
     def upload_resource(self, key: str, resource: bytes) -> None:
-        client = self._client("s3")
+        client = self._storage_client
+        bucket = client.bucket(self._deployment_resource_bucket)
+        blob = bucket.blob(key)
         try:
-            client.put_object(Body=resource, Bucket=self._deployment_resource_bucket, Key=key)
-        except ClientError as e:
+            blob.upload_from_string(resource)
+        except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(
-                f"Could not upload resource {key} to S3, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
+                f"Error uploading resource {key}, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
             ) from e
 
-    # TODO: download resource from google cloud storage
     def download_resource(self, key: str) -> bytes:
-        client = self._client("s3")
+        client = self._storage_client
+        bucket = client.bucket(self._deployment_resource_bucket)
+        blob = bucket.blob(key)
         try:
-            response = client.get_object(Bucket=self._deployment_resource_bucket, Key=key)
-        except ClientError as e:
+            return blob.download_as_bytes()
+        except google_api_exceptions.NotFound as e:
             raise RuntimeError(
-                f"Could not upload resource {key} to S3, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
+                f"Key {key} not found at the bucket {self._deployment_resource_bucket}. Is the resource deployed? {str(e)}"  # pylint: disable=line-too-long
             ) from e
-        return response["Body"].read()
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(
+                f"Error uploading resource {key}, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
+            ) from e
 
-    # TODO: get firestore table keys
     def get_keys(self, table_name: str) -> list[str]:
-        client = self._client("dynamodb")
-        response = client.scan(TableName=table_name)
-        if "Items" not in response:
-            return []
-        items = response.get("Items")
-        if items is not None:
-            return [item["key"]["S"] for item in items]
-        return []
+        client = self._firestore_client
+        collection = client.collection(table_name)
+        documents = collection.list_documents()
+        return [document.id for document in documents]
 
     # TODO: logging using monitoring v3
     def get_logs_since(self, function_instance: str, since: datetime) -> list[str]:
@@ -987,18 +1025,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
         client.delete_service(name=full_path)
 
-    def remove_role(self, role_name: str) -> None:
-        client = self._iam_admin_client
-
-        managed_policies = client.list_attached_role_policies(RoleName=role_name)
-        for policy in managed_policies.get("AttachedPolicies", []):
-            client.detach_role_policy(RoleName=role_name, PolicyArn=policy["PolicyArn"])
-
-        inline_policies = client.list_role_policies(RoleName=role_name)
-        for policy_name in inline_policies.get("PolicyNames", []):
-            client.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
-
-        client.delete_role(RoleName=role_name)
 
     def remove_messaging_topic(self, topic_identifier: str) -> None:
         client = self._client("sns")
@@ -1299,6 +1325,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
         )
 
+
 if __name__ == "__main__":
     gcp_remote_client = GCPRemoteClient(project_id="caribou-460422", region="us-east1")
     print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
@@ -1323,6 +1350,7 @@ if __name__ == "__main__":
     }
     """
 
-    sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
+    # sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
     sa = gcp_remote_client.update_role("caribou-runtime", iam_policy_2, {})
+    # gcp_remote_client.remove_role("caribou-runtime")
     print("SA:", sa)

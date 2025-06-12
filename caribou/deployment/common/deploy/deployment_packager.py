@@ -101,17 +101,17 @@ class DeploymentPackager:
                 if "google-cloud-profiler" not in requirements:
                     file.write(f"\ngoogle-cloud-profiler=={googlecloudprofiler.__version__}\n")
                 if "opentelemetry-api" not in requirements:
-                    file.write(f"\nopentelemetry-api=={self._get_opentelemetry_version("api")}\n")
+                    opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
+                    file.write(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
                 if "opentelemetry-sdk" not in requirements:
-                    file.write(f"\nopentelemetry-sdk=={self._get_opentelemetry_version("sdk")}\n")
+                    opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
+                    file.write(f"\nopentelemetry-sdk=={opentelemetry_sdk_version}\n")
                 if "opentelemetry-exporter-gcp_trace" not in requirements:
-                    file.write(
-                        f"\nopentelemetry-exporter-gcp_trace=={self._get_opentelemetry_version("exporter-gcp_trace")}\n"
-                    )
+                    opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
+                    file.write(f"\nopentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}\n")
                 if "opentelemetry-exporter-gcp_logging" not in requirements:
-                    file.write(
-                        f"\nopentelemetry-exporter-gcp_logging=={self._get_opentelemetry_version("exporter-gcp_logging")}\n" # pylint: disable = line-too-long
-                    )
+                    opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
+                    file.write(f"\nopentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}\n")
             if "pyyaml" not in requirements:
                 file.write(f"\npyyaml=={yaml.__version__}\n")
             if "pytz" not in requirements:
@@ -290,31 +290,31 @@ class DeploymentPackager:
 
         if self._determine_home_provider() == "gcp":
             if "google-cloud" not in requirements:
-                requirements.append(f"google-cloud-storage=={google.cloud.storage.__version__}")
+                requirements.append(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
             if "google-cloud-storage" not in requirements:
-                requirements.append(f"google-cloud-storage=={google.cloud.storage.__version__}")
+                requirements.append(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
             if "google-cloud-firestore" not in requirements:
-                requirements.append(f"google-cloud-firestore=={google.cloud.firestore.__version__}")
+                requirements.append(f"\ngoogle-cloud-firestore=={google.cloud.firestore.__version__}\n")
             if "google-cloud-pubsub" not in requirements:
-                requirements.append(f"google-cloud-pubsub=={google.cloud.pubsub.__version__}")
+                requirements.append(f"\ngoogle-cloud-pubsub=={google.cloud.pubsub.__version__}\n")
             if "google-cloud-logging" not in requirements:
-                requirements.append(f"google-cloud-logging=={google.cloud.logging.__version__}")
+                requirements.append(f"\ngoogle-cloud-logging=={google.cloud.logging.__version__}\n")
             if "google-cloud-trace" not in requirements:
-                requirements.append(f"google-cloud-trace=={google.cloud.trace.__version__}")
+                requirements.append(f"\ngoogle-cloud-trace=={google.cloud.trace.__version__}\n")
             if "google-cloud-profiler" not in requirements:
-                requirements.append(f"\ngoogle-cloud-profiler=={googlecloudprofiler.__version__}")
+                requirements.append(f"\ngoogle-cloud-profiler=={googlecloudprofiler.__version__}\n")
             if "opentelemetry-api" not in requirements:
-                requirements.append(f"\nopentelemetry-api=={self._get_opentelemetry_version("api")}")
+                opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
+                requirements.append(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
             if "opentelemetry-sdk" not in requirements:
-                requirements.append(f"\nopentelemetry-sdk=={self._get_opentelemetry_version("sdk")}")
+                opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
+                requirements.append(f"\nopentelemetry-sdk=={opentelemetry_sdk_version}\n")
             if "opentelemetry-exporter-gcp_trace" not in requirements:
-                requirements.append(
-                    f"opentelemetry-exporter-gcp_trace=={self._get_opentelemetry_version("exporter-gcp_trace")}"
-                )
+                opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
+                requirements.append(f"\nopentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}\n")
             if "opentelemetry-exporter-gcp_logging" not in requirements:
-                requirements.append(
-                    f"opentelemetry-exporter-gcp_logging=={self._get_opentelemetry_version("exporter-gcp_logging")}"
-                )
+                opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
+                requirements.append(f"\nopentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}\n")
 
         # Add version of pyyaml if not present in requirements
         if "pyyaml" not in requirements:

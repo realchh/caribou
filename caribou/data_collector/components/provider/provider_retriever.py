@@ -24,7 +24,8 @@ def _unit_price_to_float(price: Money) -> float:
     return float(Decimal(price.units) + Decimal(price.nanos) / Decimal(1e9))
 
 
-class ProviderRetriever(DataRetriever):
+# pylint: disable=too-many-lines
+class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-attributes
     def __init__(self, client: RemoteClient) -> None:
         super().__init__(client)
         self._integration_test_on = str_to_bool(os.environ.get("INTEGRATIONTEST_ON", "False"))
