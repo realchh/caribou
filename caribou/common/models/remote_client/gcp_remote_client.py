@@ -249,14 +249,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._ensure_firestore_database_exists(database_name="(default)")
 
         for table in [SYNC_MESSAGES_TABLE, SYNC_PREDECESSOR_COUNTER_TABLE]:
-            client.collection(table).document("_sentinel").set({"value": firestore.SERVER_TIMESTAMP}, merge=True)
+            client.collection(table).document("_sentinel").set({"created_at": firestore.SERVER_TIMESTAMP}, merge=True)
             collection_group = f"{database_path}/collectionGroups/{table}"
             ttl_field_path = f"{collection_group}/fields/{FIRESTORE_TTL_FIELD_NAME}"
 
             field = admin_client.get_field(name=ttl_field_path)
             if not field.ttl_config:
-                ttl_field = firestore_admin_v1.Field(name=ttl_field_path, ttl_config=firestore_admin_v1.Field.TtlConfig())
-                request = firestore_admin_v1.UpdateFieldRequest(field=ttl_field, update_mask=field_mask_pb2.FieldMask(paths=["ttl_config"]))
+                ttl_field = firestore_admin_v1.Field({
+                    "name": ttl_field_path,
+                    "ttl_config": firestore_admin_v1.Field.TtlConfig()
+                })
+                request = firestore_admin_v1.UpdateFieldRequest({
+                    "field": ttl_field,
+                    "update_mask": field_mask_pb2.FieldMask(paths=["ttl_config"])
+                })
                 admin_client.update_field(request=request)
 
             print(f"table {table} created on database (default)")
@@ -1345,11 +1351,10 @@ if __name__ == "__main__":
       }
     }
     """
-    gcp_remote_client.create_sync_tables()
-
-    db = firestore.Client()
-    doc = db.collection("sync_messages_table").document("dummy")
-    doc.set({"data":"ping", "expires_at": datetime.utcnow()})
+    # gcp_remote_client.create_sync_tables()
+    # db = firestore.Client()
+    # doc = db.collection("sync_messages_table").document("dummy")
+    # doc.set({"data":"ping", "expires_at": datetime.utcnow()})
     # sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
     # sa = gcp_remote_client.update_role("caribou-runtime", iam_policy_2, {})
     # gcp_remote_client.remove_role("caribou-runtime")
