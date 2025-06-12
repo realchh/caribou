@@ -1,4 +1,3 @@
-# TODO: implement automatic deployment to GCP
 import json
 import logging
 import os
@@ -16,6 +15,7 @@ from google.cloud import (
     artifactregistry_v1,
     eventarc_v1,
     firestore,
+    firestore_admin_v1,
     iam_admin_v1,
     logging_v2,
     pubsub_v1,
@@ -28,12 +28,14 @@ from google.cloud.iam_admin_v1 import IAMClient
 from google.cloud.iam_admin_v1 import types as iam_admin_types
 from google.iam.v1 import iam_policy_pb2, policy_pb2
 from google.oauth2 import service_account
+from google.protobuf import field_mask_pb2
+from google.protobuf.field_mask_pb2 import FieldMask
 from google.protobuf.json_format import MessageToDict
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
-    DEPLOYMENT_RESOURCES_TABLE,
+    FIRESTORE_TTL_FIELD_NAME,
     GLOBAL_SYSTEM_REGION,
     REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     SYNC_MESSAGES_TABLE,
@@ -79,6 +81,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._run_client = run_v2.ServicesClient(credentials=self._credentials, client_options=client_options)
         self._storage_client = storage.Client(project=self._project_id, credentials=self._credentials)
         self._firestore_client = firestore.Client(credentials=self._credentials)
+        self._firestore_admin_client = firestore_admin_v1.FirestoreAdminClient(credentials=self._credentials)
         self._pubsub_publisher_client = pubsub_v1.PublisherClient(credentials=self._credentials)
         self._pubsub_subscriber_client = pubsub_v1.SubscriberClient(credentials=self._credentials)
         self._eventarc_client = eventarc_v1.EventarcClient(credentials=self._credentials)
@@ -104,59 +107,43 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def get_cloud_run_service(self, service_name: str) -> dict[str, Any] | None:
         """
-        Retrieves a Cloud Run service and formats its configuration as a dictionary
-        that closely mirrors the original AWS Lambda configuration structure.
+        Retrieves a Cloud Run service and formats its configuration as a dictionary.
         """
         service_object = self.get_cloud_run_service_object(service_name)
         if not service_object:
             return None
 
-        # The MessageToDict function converts the protobuf object into a Python dict.
-        # This gives us a raw, complete dictionary representation of the service.
-        service_dict = MessageToDict(service_object._pb)
+        return self._format_service_dict(service_object)
 
-        # Now, let's format this raw dictionary into the desired structure.
-        return self._format_service_dict(service_dict)
-
-    def _format_service_dict(self, service_dict: dict) -> dict[str, Any]:
+    def _format_service_dict(self, service: run_v2.Service) -> dict[str, Any]:
         """
         A helper method to translate a Cloud Run service dictionary into a format
         that resembles the AWS Lambda Configuration dictionary.
         """
-        # Get the container configuration, defaulting to an empty dict if not present
-        container = service_dict.get("template", {}).get("containers", [{}])[0]
-        template = service_dict.get("template", {})
+        container = service.template.containers[0]
+        template = service.template
 
-        # Extract environment variables into a simple {key: value} dict
-        env_vars = {env["name"]: env.get("value", "") for env in container.get("env", [])}
+        env_vars = {env.name: env.value for env in container.env}
 
-        # The formatted dictionary
         formatted_config = {
-            # GCP Equivalent Fields
-            "ServiceName": service_dict.get("name", "").split("/")[-1],
-            "ServiceArn": service_dict.get("name"),  # The full resource name is the closest to an ARN
-            "ServiceUri": service_dict.get("uri"),
-            "ImageUri": container.get("image"),
-            "Role": template.get("serviceAccount"),
-            "MemorySize": container.get("resources", {}).get("limits", {}).get("memory"),
-            "CpuLimit": container.get("resources", {}).get("limits", {}).get("cpu"),
-            "Timeout": template.get("timeout"),
+            "ServiceName": service.name.split("/")[-1],
+            "ServiceArn": service.name,
+            "ServiceUri": service.uri,
+            "ImageUri": container.image,
+            "Role": template.service_account,
+            "MemorySize": container.resources.limits.get("memory"),
+            "CpuLimit": container.resources.limits.get("cpu"),
+            "Timeout": template.timeout,
             "Environment": {"Variables": env_vars},
-            "LastModified": service_dict.get("updateTime"),
-            "CreateTime": service_dict.get("createTime"),
+            "LastModified": service.update_time,
+            "CreateTime": service.create_time,
             "Scaling": {
-                "MinInstances": template.get("scaling", {}).get("minInstanceCount"),
-                "MaxInstances": template.get("scaling", {}).get("maxInstanceCount"),
+                "MinInstances": template.scaling.min_instance_count,
+                "MaxInstances": template.scaling.max_instance_count,
             },
-            # Original AWS keys for reference (commented out or set to None)
-            # "FunctionName": service_dict.get("name", "").split("/")[-1],
-            # "FunctionArn": service_dict.get("name"),
-            # "Runtime": None, # Not applicable for containers
-            # "Handler": None, # Not applicable for containers
         }
         return formatted_config
 
-    # The original method that returns the object itself is still useful
     def get_cloud_run_service_object(self, service_name: str) -> run_v2.Service | None:
         """
         Retrieves a Cloud Run service by its name.
@@ -165,6 +152,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         full_service_name = self._run_client.service_path(
             project=self._project_id, location=self._region, service=service_name
         )
+
         try:
             service_object = self._run_client.get_service(name=full_service_name)
             return service_object
@@ -252,45 +240,54 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             consumed_write_capacity,
         )
 
-    # TODO: move this from dynamodb to firestore
     def create_sync_tables(self) -> None:
         # Check if table exists
-        client = self._client("dynamodb")
+        client = self._firestore_client
+        admin_client = self._firestore_admin_client
+        database_path = f"projects/{self._project_id}/databases/(default)"
+
+        self._ensure_firestore_database_exists(database_name="(default)")
+
         for table in [SYNC_MESSAGES_TABLE, SYNC_PREDECESSOR_COUNTER_TABLE]:
-            try:
-                client.describe_table(TableName=table)
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                    client.create_table(
-                        TableName=table,
-                        KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-                        AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
-                        BillingMode="PAY_PER_REQUEST",
-                    )
-                else:
-                    raise
+            client.collection(table).document("_sentinel").set({"value": firestore.SERVER_TIMESTAMP}, merge=True)
+            collection_group = f"{database_path}/collectionGroups/{table}"
+            ttl_field_path = f"{collection_group}/fields/{FIRESTORE_TTL_FIELD_NAME}"
 
-        # Setup TTL for the sync tables
-        self._setup_ttl_for_sync_tables()
+            field = admin_client.get_field(name=ttl_field_path)
+            if not field.ttl_config:
+                ttl_field = firestore_admin_v1.Field(name=ttl_field_path, ttl_config=firestore_admin_v1.Field.TtlConfig())
+                request = firestore_admin_v1.UpdateFieldRequest(field=ttl_field, update_mask=field_mask_pb2.FieldMask(paths=["ttl_config"]))
+                admin_client.update_field(request=request)
 
-    # TODO: move this from dynamodb to firestore
-    def _setup_ttl_for_sync_tables(self) -> None:
-        # Now also enable the expiration of items in the table
-        client = self._client("dynamodb")
-        for table in [SYNC_MESSAGES_TABLE, SYNC_PREDECESSOR_COUNTER_TABLE]:
-            # Check if the table creation is complete (Wait for table to be created)
-            client.get_waiter("table_exists").wait(TableName=table)
+            print(f"table {table} created on database (default)")
 
-            # Check if TTL is already enabled
-            ttl_description = client.describe_time_to_live(TableName=table)
-            ttl_status = ttl_description.get("TimeToLiveDescription", {}).get("TimeToLiveStatus", "DISABLED")
+    def _ensure_firestore_database_exists(self, database_name:str) -> bool:
+        client = self._firestore_admin_client
+        db_path = f"projects/{self._project_id}/databases/{database_name}"
+        try:
+            client.get_database(name=db_path)
+            return True
+        except google_api_exceptions.NotFound:
+            pass
 
-            if ttl_status != "ENABLED":
-                # Now also enable the expiration of items in the table
-                client.update_time_to_live(
-                    TableName=table,
-                    TimeToLiveSpecification={"Enabled": True, "AttributeName": SYNC_TABLE_TTL_ATTRIBUTE_NAME},
-                )
+        database = firestore_admin_v1.types.Database(
+            name=db_path,
+            type_=firestore_admin_v1.types.Database.DatabaseType.FIRESTORE_NATIVE,
+            location_id=self._region
+        )
+
+        try:
+            response = client.create_database(
+                parent=f"projects/{self._project_id}", database_id=database_name, database = database
+            )
+            response.result()
+            print(f"database {db_path} created")
+            return True
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Failed to create database: {e}")
+
+
+
 
     # TODO: move this from dynamodb to firestore
     def upload_predecessor_data_at_sync_node(
@@ -543,7 +540,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def _ensure_repository(self, repository_name: str) -> str:
         """
-        Returns the full resource name of the repository (if exists). If it doesn't exist, it will be created.
+        Returns the full resource name of the repository. If the repository does not exist, it will be created.
         """
         repository_name = repository_name.lower()
         client = self._artifact_registry_client
@@ -751,7 +748,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Could not delete member from IAM Role {e}") from e
 
-        time.sleep(3) # wait until gcp updates the roles
+        time.sleep(3)  # wait until gcp updates the roles
 
         try:
             iam_client = self._iam_admin_client
@@ -1024,7 +1021,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client = self._run_client
         full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
         client.delete_service(name=full_path)
-
 
     def remove_messaging_topic(self, topic_identifier: str) -> None:
         client = self._client("sns")
@@ -1328,7 +1324,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
 if __name__ == "__main__":
     gcp_remote_client = GCPRemoteClient(project_id="caribou-460422", region="us-east1")
-    print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
+    # print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
     iam_policy = """
     {
       "gcp": {
@@ -1349,8 +1345,13 @@ if __name__ == "__main__":
       }
     }
     """
+    gcp_remote_client.create_sync_tables()
 
+    db = firestore.Client()
+    doc = db.collection("sync_messages_table").document("dummy")
+    doc.set({"data":"ping", "expires_at": datetime.utcnow()})
     # sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
-    sa = gcp_remote_client.update_role("caribou-runtime", iam_policy_2, {})
+    # sa = gcp_remote_client.update_role("caribou-runtime", iam_policy_2, {})
     # gcp_remote_client.remove_role("caribou-runtime")
-    print("SA:", sa)
+    # sa = gcp_remote_client.get_cloud_run_service(service_name="visualize")
+    # print("SA:", sa)

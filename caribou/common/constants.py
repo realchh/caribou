@@ -169,3 +169,6 @@ AWS_TIMEOUT_SECONDS = (
 # TTL for dynamodb synchronization tables
 SYNC_TABLE_TTL_ATTRIBUTE_NAME = "cb_ttl_expiration_time"
 SYNC_TABLE_TTL = 86400  # Equivalent to 1 day (24 hours) in seconds
+
+# TTL for firestore synchronization tables
+FIRESTORE_TTL_FIELD_NAME = "expires_at"
