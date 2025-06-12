@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, UTC, timedelta
 from typing import Any, Optional
 
 from google.api_core import exceptions as google_api_exceptions
@@ -181,64 +181,33 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self, predecessor_name: str, sync_node_name: str, workflow_instance_id: str, direct_call: bool
     ) -> tuple[list[bool], float, float]:
         client = self._firestore_client
+        document = client.collection(SYNC_PREDECESSOR_COUNTER_TABLE).document(workflow_instance_id)
+        tx = client.transaction()
 
-        # Calculate the expiration time for the sync node
-        expiration_time = int(time.time()) + SYNC_TABLE_TTL
+        @firestore.transactional
+        def _transaction(tx: firestore.Transaction):
+            snap = document.get(transaction=tx)
+            data = snap.to_dict()
+            if not data:
+                data = {}
 
-        # Record the consumed capacity (Write Capacity Units) for this operation
-        # Refer to: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/read-write-operations.html
+            sync_map: dict[str, bool] = data.get(sync_node_name, {})
+
+            if predecessor_name not in sync_map or direct_call:
+                sync_map[predecessor_name] = direct_call
+
+            data[sync_node_name] = sync_map
+            data[FIRESTORE_TTL_FIELD_NAME] = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
+            # print(str(data[FIRESTORE_TTL_FIELD_NAME]))
+            tx.set(document, data)
+            return list(sync_map.values()), data
+
+        bool_list, final_doc = _transaction(tx)
+        final_doc["expires_at"] = str(final_doc["expires_at"])
         consumed_write_capacity = 0.0
+        response_size = len(json.dumps(final_doc).encode()) / (1024**3)
 
-        # Check if the map exists and create it if not
-        mc_response = client.update_item(
-            TableName=SYNC_PREDECESSOR_COUNTER_TABLE,
-            Key={"id": {"S": workflow_instance_id}},
-            UpdateExpression="SET #s = if_not_exists(#s, :empty_map), #ttl = :ttl",
-            ExpressionAttributeNames={
-                "#s": sync_node_name,
-                "#ttl": SYNC_TABLE_TTL_ATTRIBUTE_NAME,  # TTL attribute
-            },
-            ExpressionAttributeValues={
-                ":empty_map": {"M": {}},
-                ":ttl": {"N": str(expiration_time)},  # TTL as a number
-            },
-            ReturnConsumedCapacity="TOTAL",
-        )
-
-        consumed_write_capacity += mc_response.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
-
-        # Update the map with the new predecessor_name and direct_call
-        if not direct_call:
-            response = client.update_item(
-                TableName=SYNC_PREDECESSOR_COUNTER_TABLE,
-                Key={"id": {"S": workflow_instance_id}},
-                UpdateExpression="SET #s.#p = if_not_exists(#s.#p, :direct_call)",
-                ExpressionAttributeNames={"#s": sync_node_name, "#p": predecessor_name},
-                ExpressionAttributeValues={":direct_call": {"BOOL": direct_call}},
-                ReturnValues="ALL_NEW",
-                ReturnConsumedCapacity="TOTAL",
-            )
-        else:
-            response = client.update_item(
-                TableName=SYNC_PREDECESSOR_COUNTER_TABLE,
-                Key={"id": {"S": workflow_instance_id}},
-                UpdateExpression="SET #s.#p = :direct_call",
-                ExpressionAttributeNames={"#s": sync_node_name, "#p": predecessor_name},
-                ExpressionAttributeValues={":direct_call": {"BOOL": direct_call}},
-                ReturnValues="ALL_NEW",
-                ReturnConsumedCapacity="TOTAL",
-            )
-
-        consumed_write_capacity += response.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
-
-        # Measure the size of the response
-        response_size = len(json.dumps(response).encode("utf-8")) / (1024**3)
-
-        return (
-            [item["BOOL"] for item in response["Attributes"][sync_node_name]["M"].values()],
-            response_size,
-            consumed_write_capacity,
-        )
+        return bool_list, response_size, consumed_write_capacity
 
     def create_sync_tables(self) -> None:
         # Check if table exists
@@ -255,19 +224,17 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
             field = admin_client.get_field(name=ttl_field_path)
             if not field.ttl_config:
-                ttl_field = firestore_admin_v1.Field({
-                    "name": ttl_field_path,
-                    "ttl_config": firestore_admin_v1.Field.TtlConfig()
-                })
-                request = firestore_admin_v1.UpdateFieldRequest({
-                    "field": ttl_field,
-                    "update_mask": field_mask_pb2.FieldMask(paths=["ttl_config"])
-                })
+                ttl_field = firestore_admin_v1.Field(
+                    {"name": ttl_field_path, "ttl_config": firestore_admin_v1.Field.TtlConfig()}
+                )
+                request = firestore_admin_v1.UpdateFieldRequest(
+                    {"field": ttl_field, "update_mask": field_mask_pb2.FieldMask(paths=["ttl_config"])}
+                )
                 admin_client.update_field(request=request)
 
             print(f"table {table} created on database (default)")
 
-    def _ensure_firestore_database_exists(self, database_name:str) -> bool:
+    def _ensure_firestore_database_exists(self, database_name: str) -> bool:
         client = self._firestore_admin_client
         db_path = f"projects/{self._project_id}/databases/{database_name}"
         try:
@@ -279,48 +246,42 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         database = firestore_admin_v1.types.Database(
             name=db_path,
             type_=firestore_admin_v1.types.Database.DatabaseType.FIRESTORE_NATIVE,
-            location_id=self._region
+            location_id=self._region,
         )
 
         try:
             response = client.create_database(
-                parent=f"projects/{self._project_id}", database_id=database_name, database = database
+                parent=f"projects/{self._project_id}", database_id=database_name, database=database
             )
             response.result()
-            print(f"database {db_path} created")
             return True
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Failed to create database: {e}")
 
-
-
-
-    # TODO: move this from dynamodb to firestore
     def upload_predecessor_data_at_sync_node(
         self, function_name: str, workflow_instance_id: str, message: str
     ) -> float:
-        client = self._client("dynamodb")
+        client = self._firestore_client
+        document = client.collection(SYNC_MESSAGES_TABLE).document(f"{function_name}:{workflow_instance_id}")
 
-        # Calculate the expiration time for the sync node
-        expiration_time = int(time.time()) + SYNC_TABLE_TTL
+        ttl_time = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
 
-        sync_node_id = f"{function_name}:{workflow_instance_id}"
-        response = client.update_item(
-            TableName=SYNC_MESSAGES_TABLE,
-            Key={"id": {"S": sync_node_id}},
-            UpdateExpression="ADD #M :m SET #ttl = :ttl",
-            ExpressionAttributeNames={
-                "#M": "message",
-                "#ttl": SYNC_TABLE_TTL_ATTRIBUTE_NAME,  # TTL attribute
-            },
-            ExpressionAttributeValues={
-                ":m": {"SS": [message]},
-                ":ttl": {"N": str(expiration_time)},
-            },
-            ReturnConsumedCapacity="TOTAL",
-        )
+        tx = client.transaction()
 
-        return response.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
+        @firestore.transactional
+        def _transaction(tx: firestore.Transaction):
+            tx.set(
+                document,
+                {
+                    "message": firestore.ArrayUnion([message]),
+                    FIRESTORE_TTL_FIELD_NAME: ttl_time,
+                },
+                merge=True,
+            )
+
+        _transaction(tx)
+
+        return 0.0
 
     # TODO: move this from dynamodb to firestore
     def get_predecessor_data(
@@ -1360,3 +1321,16 @@ if __name__ == "__main__":
     # gcp_remote_client.remove_role("caribou-runtime")
     # sa = gcp_remote_client.get_cloud_run_service(service_name="visualize")
     # print("SA:", sa)
+    # os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8787"
+    # gcp_remote_client.set_predecessor_reached("A", "sync1", "wf-X", False)
+    # gcp_remote_client.set_predecessor_reached("B", "sync1", "wf-X", True)
+    #
+    # db = firestore.Client(project="demo-proj")
+    # doc = db.collection("caribou_sync_counters").document("wf-X").get()
+    # print(doc.to_dict())
+    gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "hello")
+    gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "world")
+
+    doc = gcp_remote_client._firestore_client.collection(SYNC_MESSAGES_TABLE) \
+        .document("fnA:wf-1").get().to_dict()
+    print(doc)
