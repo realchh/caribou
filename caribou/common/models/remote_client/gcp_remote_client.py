@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
-from datetime import datetime, UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Optional
 
 from google.api_core import exceptions as google_api_exceptions
@@ -88,8 +88,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._artifact_registry_client = artifactregistry_v1.ArtifactRegistryClient(credentials=self._credentials)
         self._iam_admin_client = IAMClient(credentials=self._credentials)
         self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
+        self._logging_client = logging_v2.Client(credentials=self._credentials)
 
-        self._client_cache: dict[str, Any] = {}
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
         # Allow for override of the deployment resources bucket (Due to S3 bucket name restrictions)
         self._deployment_resource_bucket: str = os.environ.get(
@@ -255,7 +255,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             response.result()
             return True
         except google_api_exceptions.GoogleAPICallError as e:
-            raise RuntimeError(f"Failed to create database: {e}")
+            raise RuntimeError(f"Failed to create database: {e}") from e
 
     def upload_predecessor_data_at_sync_node(
         self, function_name: str, workflow_instance_id: str, message: str
@@ -329,7 +329,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     zip_ref.extractall(tmpdirname)
 
                 # Step 2: Create a Dockerfile in the temporary directory
-                dockerfile_content = self._generate_dockerfile(runtime, handler, additional_docker_commands)
+                dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 
@@ -432,7 +432,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         client = self._firestore_client
 
-        snap = (client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id).get())
+        snap = client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id).get()
 
         if not snap.exists:
             return ""
@@ -443,19 +443,19 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return image_uri
 
-
-    # TODO: change from aws lambda insights to cloud run insights or whatever it is called
-    def _generate_dockerfile(self, runtime: str, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
+    def _generate_dockerfile(self, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
         run_command = ""
         if additional_docker_commands and len(additional_docker_commands) > 0:
             run_command += " && ".join(additional_docker_commands)
         if len(run_command) > 0:
             run_command = f"RUN {run_command}"
-
         return f"""
+        FROM {self._region}-docker.pkg.dev/serverless-runtimes/google-22/runtimes/python312
         COPY requirements.txt ./
         {run_command}
+        USER root
         RUN pip3 install --no-cache-dir -r requirements.txt
+        USER app
         ENV ENABLE_PROFILER="true"
         COPY app.py ./
         COPY src ./src
@@ -463,7 +463,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         CMD ["{handler}"]
         """
 
-    # TODO: nothing to be changed i think
     def _build_docker_image(self, context_path: str, image_name: str) -> None:
         try:
             subprocess.run(["docker", "build", "--platform", "linux/amd64", "-t", image_name, context_path], check=True)
@@ -547,7 +546,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     zip_ref.extractall(tmpdirname)
 
-                dockerfile_content = self._generate_dockerfile(runtime, handler, additional_docker_commands)
+                dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 
@@ -569,6 +568,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         )
 
         return service_url
+
+    def remove_function(self, function_name: str) -> None:
+        client = self._run_client
+        full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
+        try:
+            response = client.delete_service(name=full_path)
+            response.result()
+        except google_api_exceptions.NotFound as e:
+            print(f"Function {function_name} not found (maybe the function is already deleted): {e}")
 
     def create_role(self, role_name: str, policy: str, trust_policy: dict) -> str:
         policy_list = json.loads(policy)
@@ -756,11 +764,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         doc_ref.set(update_data, merge=True)
 
+    # TODO: GCP capacity = 1/64 RCU
     def get_value_from_table(self, table_name: str, key: str, consistent_read: bool = True) -> tuple[str, float]:
         client = self._firestore_client
         doc = client.collection(table_name).document(key).get()
 
-        # TODO: GCP capacity = 1/64 RCU
         consumed_read_capacity = 0.0
 
         if not doc.exists:
@@ -833,128 +841,65 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         documents = collection.list_documents()
         return [document.id for document in documents]
 
-    # TODO: logging using monitoring v3
+    def _log_filter(
+            self,
+            service_name: str,
+            start: datetime | None = None,
+            end: datetime | None = None,
+            *,
+            insights: bool = False
+    ) -> list[str]:
+        if start:
+            time_start = start.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        else:
+            time_start = None
+
+        if end:
+            time_end = end.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        else:
+            time_end = None
+
+        resource_filter = (
+            'resource.type="cloud_run_revision" '
+            f'resource.labels.service_name="{service_name}"'
+        )
+
+        if insights:
+            resource_filter = (
+                'resource.type="cloud_run_revision" '
+                'jsonPayload.@type="type.googleapis.com/google.cloud.run.v1.Revision"'
+            )
+
+        query = (
+            f'{resource_filter} '
+            f'timestamp>="{time_start}" ' if start else ''
+            f'timestamp<="{time_end}"' if end else ''
+        )
+
+        client = self._logging_client
+        entries = client.list_entries(filter_=query, order_by=logging_v2.DESCENDING)
+
+        return [entry.payload.get("message", str(entry.payload)) for entry in entries]
+
     def get_logs_since(self, function_instance: str, since: datetime) -> list[str]:
-        time_ms_since_epoch = int(time.mktime(since.timetuple())) * 1000
-        client = self._client("logs")
+        return self._log_filter(function_instance, start=since)
 
-        next_token = None
-
-        log_events: list[str] = []
-        while True:
-            if next_token:
-                response = client.filter_log_events(
-                    logGroupName=f"/aws/lambda/{function_instance}",
-                    startTime=time_ms_since_epoch,
-                    nextToken=next_token,
-                )
-            else:
-                try:
-                    response = client.filter_log_events(
-                        logGroupName=f"/aws/lambda/{function_instance}", startTime=time_ms_since_epoch
-                    )
-                except client.exceptions.ResourceNotFoundException:
-                    # No logs found
-                    return []
-
-            log_events.extend(event["message"] for event in response.get("events", []))
-
-            next_token = response.get("nextToken")
-            if not next_token:
-                break
-
-        return log_events
-
-    # TODO: logging using monitoring v3
     def get_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
-        time_ms_start = int(start.timestamp() * 1000)
-        time_ms_end = int(end.timestamp() * 1000)
-        client = self._client("logs")
+        return self._log_filter(function_instance, start=start, end=end)
 
-        next_token = None
-
-        log_events: list[str] = []
-        while True:
-            if next_token:
-                response = client.filter_log_events(
-                    logGroupName=f"/aws/lambda/{function_instance}",
-                    startTime=time_ms_start,
-                    endTime=time_ms_end,
-                    nextToken=next_token,
-                )
-            else:
-                try:
-                    response = client.filter_log_events(
-                        logGroupName=f"/aws/lambda/{function_instance}", startTime=time_ms_start, endTime=time_ms_end
-                    )
-                except client.exceptions.ResourceNotFoundException:
-                    # No logs found
-                    return []
-
-            log_events.extend(event["message"] for event in response.get("events", []))
-
-            next_token = response.get("nextToken")
-            if not next_token:
-                break
-
-        return log_events
-
-    # TODO: logging using monitoring v3
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
-        time_ms_start = int(start.timestamp() * 1000)
-        time_ms_end = int(end.timestamp() * 1000)
-        client = self._client("logs")
+        return self._log_filter(function_instance, start=start, end=end, insights=True)
 
-        next_token = None
-
-        log_events: list[str] = []
-        while True:
-            if next_token:
-                response = client.filter_log_events(
-                    logGroupName="/aws/lambda-insights",
-                    logStreamNamePrefix=function_instance,
-                    startTime=time_ms_start,
-                    endTime=time_ms_end,
-                    nextToken=next_token,
-                )
-            else:
-                try:
-                    response = client.filter_log_events(
-                        logGroupName="/aws/lambda-insights",
-                        logStreamNamePrefix=function_instance,
-                        startTime=time_ms_start,
-                        endTime=time_ms_end,
-                    )
-                except client.exceptions.ResourceNotFoundException:
-                    # No logs found
-                    return []
-
-            log_events.extend(event["message"] for event in response.get("events", []))
-
-            next_token = response.get("nextToken")
-            if not next_token:
-                break
-
-        return log_events
-
-    # TODO: move to firestore
     def remove_key(self, table_name: str, key: str) -> None:
-        client = self._client("dynamodb")
+        client = self._firestore_client
+        document = client.collection(table_name).document(key)
 
         try:
-            client.delete_item(TableName=table_name, Key={"key": {"S": key}})
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ValidationException":
-                print(f"Table '{table_name}' Remove Key '{key}' Error.")
-                print(f"{e.response['Error']['Code']}: {e.response['Error']['Message']}")
-            else:
-                raise
-
-    # TODO: implement in cloud run
-    def remove_function(self, function_name: str) -> None:
-        client = self._run_client
-        full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
-        client.delete_service(name=full_path)
+            document.delete()
+        except google_api_exceptions.NotFound as e:
+            print(f"Key {key} not found: {e}")
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Could not delete key {key} from table {table_name}: {e}") from e
 
     def remove_messaging_topic(self, topic_identifier: str) -> None:
         client = self._client("sns")

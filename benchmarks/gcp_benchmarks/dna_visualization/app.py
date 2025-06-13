@@ -1,40 +1,32 @@
 from typing import Any
 
-import json
-
-import google
+from caribou.deployment.client import CaribouWorkflow
 from dna_features_viewer import BiopythonTranslator
+import json
 import matplotlib.pyplot as plt
 import uuid
 import os
 import google.cloud.storage as gcs
-from google.cloud.functions import context
 import base64
+
 
 # Change the following bucket name and region to match your setup
 gcp_bucket_name = "caribou-dna-visualization-naufal"
 
-# workflow = CaribouWorkflow(name="dna_visualization", version="0.0.1")
+workflow = CaribouWorkflow(name="dna_visualization", version="0.0.2")
 
 
-# @workflow.serverless_function(
-#     name="visualize",
-#     entry_point=True,
-# )
-def visualize(event: dict, context: google.cloud.functions.context) -> None:
-    # temporary
-    # if isinstance(event, str):
-    #     event = json.loads(event)
-    #
-    # if "gen_file_name" in event:
-    #     gen_file_name = event["gen_file_name"]
-    # else:
-    #     raise ValueError("No gen_file_name provided")
+@workflow.serverless_function(
+    name="visualize",
+    entry_point=True,
+)
+def visualize(event: dict) -> dict[str, Any]:
     pubsub_message = base64.b64decode(event["data"]).decode("utf-8")
     payload = json.loads(pubsub_message)
 
-    gen_file_name = payload["gen_file_name"]
-    if not gen_file_name:
+    if "gen_file_name" in payload:
+        gen_file_name = payload["gen_file_name"]
+    else:
         raise ValueError("No gen_file_name provided")
 
     req_id = uuid.uuid4()
@@ -76,4 +68,4 @@ def visualize(event: dict, context: google.cloud.functions.context) -> None:
     os.remove(local_gen_filename)
     os.remove(local_result_filename)
 
-    # return {"status": 200}
+    return {"status": 200}
