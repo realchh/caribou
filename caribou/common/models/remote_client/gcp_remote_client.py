@@ -809,6 +809,23 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         doc = client.collection(table_name).document(key).get()
         return doc.exists
 
+    def get_keys(self, table_name: str) -> list[str]:
+        client = self._firestore_client
+        collection = client.collection(table_name)
+        documents = collection.list_documents()
+        return [document.id for document in documents]
+
+    def remove_key(self, table_name: str, key: str) -> None:
+        client = self._firestore_client
+        document = client.collection(table_name).document(key)
+
+        try:
+            document.delete()
+        except google_api_exceptions.NotFound as e:
+            print(f"Key {key} not found: {e}")
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Could not delete key {key} from table {table_name}: {e}") from e
+
     def upload_resource(self, key: str, resource: bytes) -> None:
         client = self._storage_client
         bucket = client.bucket(self._deployment_resource_bucket)
@@ -835,11 +852,17 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 f"Error uploading resource {key}, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
             ) from e
 
-    def get_keys(self, table_name: str) -> list[str]:
-        client = self._firestore_client
-        collection = client.collection(table_name)
-        documents = collection.list_documents()
-        return [document.id for document in documents]
+    def remove_resource(self, key: str) -> None:
+        client = self._storage_client
+        bucket = client.bucket(self._deployment_resource_bucket)
+        blob = bucket.blob(key)
+
+        try:
+            blob.delete()
+        except google_api_exceptions.NotFound as e:
+            print(f"Key {key} not found: {e}")
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Could not delete resource {key} from database: {e}") from e
 
     def _log_filter(
             self,
@@ -890,61 +913,29 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
         return self._log_filter(function_instance, start=start, end=end, insights=True)
 
-    def remove_key(self, table_name: str, key: str) -> None:
-        client = self._firestore_client
-        document = client.collection(table_name).document(key)
-
-        try:
-            document.delete()
-        except google_api_exceptions.NotFound as e:
-            print(f"Key {key} not found: {e}")
-        except google_api_exceptions.GoogleAPICallError as e:
-            raise RuntimeError(f"Could not delete key {key} from table {table_name}: {e}") from e
-
     def remove_messaging_topic(self, topic_identifier: str) -> None:
-        client = self._client("sns")
+        publisher_client = self._pubsub_publisher_client
+        subscriber_client = self._pubsub_subscriber_client
 
         # Get all subscriptions for the topic
-        response = client.list_subscriptions_by_topic(TopicArn=topic_identifier)
-        subscriptions = response.get("Subscriptions", [])
+        for subscription in subscriber_client.list_subscriptions(request={"project": f"projects/{self._project_id}"}):
+            if subscription.topic == topic_identifier:
+                try:
+                    subscriber_client.delete_subscription(subscription=subscription.name)
+                except google_api_exceptions.NotFound:
+                    pass
 
-        # Handle pagination if there are more subscriptions
-        while "NextToken" in response:
-            response = client.list_subscriptions_by_topic(TopicArn=topic_identifier, NextToken=response["NextToken"])
-            subscriptions.extend(response.get("Subscriptions", []))
-
-        # Unsubscribe each subscription
-        for subscription in subscriptions:
-            client.unsubscribe(SubscriptionArn=subscription["SubscriptionArn"])
-
-        # Delete the topic after unsubscribing all its subscriptions
-        client.delete_topic(TopicArn=topic_identifier)
+        publisher_client.delete_topic(topic=topic_identifier)
 
     def get_topic_identifier(self, topic_name: str) -> str:
-        client = self._client("sns")
-        next_token = ""
+        publisher_client = self._pubsub_publisher_client
+        topic_path = publisher_client.topic_path(self._project_id, topic_name)
 
-        while True:
-            response = client.list_topics(NextToken=next_token) if next_token else client.list_topics()
-
-            for topic in response["Topics"]:
-                if topic_name in topic["TopicArn"]:
-                    return topic["TopicArn"]
-
-            next_token = response.get("NextToken")
-            if not next_token:
-                break
-
-        raise RuntimeError(f"Topic {topic_name} not found")
-
-    def remove_resource(self, key: str) -> None:
-        client = self._client("s3")
         try:
-            client.delete_object(Bucket=self._deployment_resource_bucket, Key=key)
-        except ClientError as e:
-            raise RuntimeError(
-                f"Could not upload resource {key} to S3, does the bucket {self._deployment_resource_bucket} exist and do you have permission to access it: {str(e)}"  # pylint: disable=line-too-long
-            ) from e
+            publisher_client.get_topic(topic=topic_path)
+            return topic_path
+        except google_api_exceptions.NotFound as e:
+            raise RuntimeError(f"Topic {topic_name} not found")
 
     def remove_artifact_registry_repository(self, repository_name: str) -> None:
         repository_name = repository_name.lower()
@@ -965,7 +956,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.NotFound:
             return False
 
-    # TODO: comment out for now, too complicated
     def deploy_remote_cli(
         self,
         function_name: str,
@@ -1031,8 +1021,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             chmod +x build_caribou_no_tests.sh && \
             ./build_caribou_no_tests.sh
 
-        # Stage 2: Build the final image based on Lambda Python 3.12 runtime
-        FROM public.ecr.aws/lambda/python:3.12
+        # Stage 2: Build the final image based on GCP python 3.12 runtime
+        FROM {self._region}-docker.pkg.dev/serverless-runtimes/google-22/runtimes/python312
 
         # Copy the compiled Go application from the builder stage
         COPY --from=builder caribou-go caribou-go
@@ -1082,10 +1072,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         }
         if timeout >= 1:
             kwargs["Timeout"] = timeout
-        arn, state = self._create_lambda_function(kwargs)
+        arn = self._create_cloud_run_service(
+            service_name=function_name,
+            image_uri=image_uri,
 
-        if state != "Active":
-            self._wait_for_function_to_become_active(function_name)
+        )
 
         print(f"Caribou Lambda Framework remote cli function {function_name}" f" created successfully, with ARN: {arn}")
 
