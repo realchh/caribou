@@ -176,7 +176,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def cloud_run_service_exists(self, resource: Resource) -> bool:
         return self.get_cloud_run_service(resource.name) is not None
 
-    # TODO: Check the functionality and modify this
     def set_predecessor_reached(
         self, predecessor_name: str, sync_node_name: str, workflow_instance_id: str, direct_call: bool
     ) -> tuple[list[bool], float, float]:
@@ -283,37 +282,24 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return 0.0
 
-    # TODO: move this from dynamodb to firestore
     def get_predecessor_data(
         self,
         current_instance_name: str,
         workflow_instance_id: str,
         consistent_read: bool = True,  # pylint: disable=unused-argument
     ) -> tuple[list[str], float]:
-        client = self._client("dynamodb")
-        sync_node_id = f"{current_instance_name}:{workflow_instance_id}"
-        # Currently we use strongly consistent reads for the sync messages
-        # Refer to: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/read-write-operations.html
-        response = client.get_item(
-            TableName=SYNC_MESSAGES_TABLE,
-            Key={"id": {"S": sync_node_id}},
-            ReturnConsumedCapacity="TOTAL",
-            ConsistentRead=consistent_read,
-        )
+        client = self._firestore_client
+        document_id = f"{current_instance_name}:{workflow_instance_id}"
+        snap = client.collection(SYNC_MESSAGES_TABLE).document(document_id).get()
 
-        # Record the consumed capacity (Read Capacity Units) for the sync node
-        consumed_read_capacity = response.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
+        if not snap.exists:
+            return [], 0.0
 
-        if "Item" not in response:
-            return [], consumed_read_capacity
+        data = snap.to_dict() or {}
+        messages: list[str] = data.get("message", [])
+        consumed_read_capacity = 0.0
+        return messages, consumed_read_capacity
 
-        item = response.get("Item")
-        if item is not None and "message" in item:
-            return item["message"]["SS"], consumed_read_capacity
-
-        return [], consumed_read_capacity
-
-    # TODO: i think this does not need much change
     def create_function(
         self,
         function_name: str,
@@ -417,7 +403,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         op.result()
         return client.get_service(name=full_name).uri
 
-    # TODO: move from dynamodb to firestore, logic does not need much changes
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
         workflow_instance_id = "-".join(function_name.split("-")[0:2])
 
@@ -428,54 +413,36 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         self._workflow_image_cache[workflow_instance_id].update({function_name_simple: image_name})
 
-        client = self._session.client("dynamodb", region_name=GLOBAL_SYSTEM_REGION)
+        client = self._firestore_client
+        document = client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id)
+        document.set({function_name_simple: image_name}, merge=True)
 
-        # Check if the item exists and create dictionary if not
-        client.update_item(
-            TableName=CARIBOU_WORKFLOW_IMAGES_TABLE,
-            Key={"key": {"S": workflow_instance_id}},
-            UpdateExpression="SET #v = if_not_exists(#v, :empty_map)",
-            ExpressionAttributeNames={"#v": "value"},
-            ExpressionAttributeValues={":empty_map": {"M": {}}},
-        )
-
-        client.update_item(
-            TableName=CARIBOU_WORKFLOW_IMAGES_TABLE,
-            Key={"key": {"S": workflow_instance_id}},
-            UpdateExpression="SET #v.#f = :value",
-            ExpressionAttributeNames={"#v": "value", "#f": function_name_simple},
-            ExpressionAttributeValues={":value": {"S": image_name}},
-        )
-
-    # TODO: move from dynamodb to firestore, logic does not need much changes
-    def _get_deployed_image_uri(self, function_name: str, consistent_read: bool = True) -> str:
+    def _get_deployed_image_uri(self, function_name: str) -> str:
         workflow_instance_id = "-".join(function_name.split("-")[0:2])
 
         function_name_simple = function_name[len(workflow_instance_id) + 1 :].rsplit("_", 1)[0]
 
-        if function_name_simple in self._workflow_image_cache.get(workflow_instance_id, {}):
-            return self._workflow_image_cache[workflow_instance_id][function_name_simple]
+        if workflow_instance_id not in self._workflow_image_cache:
+            self._workflow_image_cache[workflow_instance_id] = {}
 
-        client = self._session.client("dynamodb", region_name=GLOBAL_SYSTEM_REGION)
+        cached = self._workflow_image_cache[workflow_instance_id].get(function_name_simple)
 
-        response = client.get_item(
-            TableName=CARIBOU_WORKFLOW_IMAGES_TABLE,
-            Key={"key": {"S": workflow_instance_id}},
-            ConsistentRead=consistent_read,
-        )
+        if cached:
+            return cached
 
-        if "Item" not in response:
+        client = self._firestore_client
+
+        snap = (client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id).get())
+
+        if not snap.exists:
             return ""
 
-        item = response.get("Item")
-        if item is not None and "value" in item:
-            if workflow_instance_id not in self._workflow_image_cache:
-                self._workflow_image_cache[workflow_instance_id] = {}
-            self._workflow_image_cache[workflow_instance_id].update(
-                {function_name_simple: item["value"]["M"].get(function_name_simple, {}).get("S", "")}
-            )
-            return item["value"]["M"].get(function_name_simple, {}).get("S", "")
-        return ""
+        document_dict = snap.to_dict() or {}
+        image_uri = document_dict.get(function_name_simple, "")
+        self._workflow_image_cache.setdefault(workflow_instance_id, {})[function_name_simple] = image_uri
+
+        return image_uri
+
 
     # TODO: change from aws lambda insights to cloud run insights or whatever it is called
     def _generate_dockerfile(self, runtime: str, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
@@ -1328,9 +1295,12 @@ if __name__ == "__main__":
     # db = firestore.Client(project="demo-proj")
     # doc = db.collection("caribou_sync_counters").document("wf-X").get()
     # print(doc.to_dict())
-    gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "hello")
-    gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "world")
+    # gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "hello")
+    # gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "world")
+    #
+    # doc = gcp_remote_client._firestore_client.collection(SYNC_MESSAGES_TABLE) \
+    #     .document("fnA:wf-1").get().to_dict()
 
-    doc = gcp_remote_client._firestore_client.collection(SYNC_MESSAGES_TABLE) \
-        .document("fnA:wf-1").get().to_dict()
-    print(doc)
+    # msgs, cap = gcp_remote_client.get_predecessor_data("fnA", "wf-1")
+    # print(msgs)
+    # print(cap)
