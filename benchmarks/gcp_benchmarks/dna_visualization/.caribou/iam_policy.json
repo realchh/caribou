@@ -4,7 +4,8 @@
       "roles/logging.logWriter",
       "roles/pubsub.publisher",
       "roles/datastore.user",
-      "roles/storage.objectAdmin"
+      "roles/storage.objectAdmin",
+      "roles/artifactregistry.reader"
     ]
   }
 }

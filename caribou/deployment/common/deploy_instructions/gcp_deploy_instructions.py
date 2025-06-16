@@ -10,9 +10,9 @@ class GCPDeployInstructions(DeployInstructions):
     def _get_create_iam_role_instruction(self, role: IAMRole, iam_role_varname: str) -> Instruction:
         # In GCP we normally create a service account and attach roles
         return APICall(
-            name="create_service_account",
+            name="create_role",
             params={
-                "service_account_name": role.name,
+                "role_name": role.name,
                 "policy": role.get_policy(self._provider),
             },
             output_var=iam_role_varname,
@@ -20,9 +20,9 @@ class GCPDeployInstructions(DeployInstructions):
 
     def _get_update_iam_role_instruction(self, role: IAMRole, iam_role_varname: str) -> Instruction:
         return APICall(
-            name="update_service_account",
+            name="update_role",
             params={
-                "service_account_name": role.name,
+                "role_name": role.name,
                 "policy": role.get_policy(self._provider),
             },
             output_var=iam_role_varname,
@@ -39,16 +39,17 @@ class GCPDeployInstructions(DeployInstructions):
         function_varname: str,
     ) -> Instruction:
         return APICall(
-            name="create_cloud_function",
+            name="create_function",
             params={
                 "function_name": name,
-                "service_account": Variable(iam_role_varname),
+                "role_identifier": Variable(iam_role_varname),
                 "zip_contents": zip_contents,
                 "runtime": runtime,
-                "entry_point": handler,
+                "handler": handler,
                 "environment_variables": environment_variables,
                 "timeout": self._config["timeout"],
-                "memory": self._config["memory"],
+                "memory_size": self._config["memory"],
+                "additional_docker_commands": self._config.get("additional_docker_commands", []),
             },
             output_var=function_varname,
         )
@@ -64,16 +65,17 @@ class GCPDeployInstructions(DeployInstructions):
         function_varname: str,
     ) -> Instruction:
         return APICall(
-            name="update_cloud_function",
+            name="update_function",
             params={
                 "function_name": name,
                 "service_account": Variable(iam_role_varname),
                 "zip_contents": zip_contents,
                 "runtime": runtime,
-                "entry_point": handler,
+                "handler": handler,
                 "environment_variables": environment_variables,
                 "timeout": self._config["timeout"],
-                "memory": self._config["memory"],
+                "memory_size": self._config["memory"],
+                "additional_docker_commands": self._config.get("additional_docker_commands", []),
             },
             output_var=function_varname,
         )

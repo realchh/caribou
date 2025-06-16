@@ -33,6 +33,7 @@ CARIBOU_WORKFLOW_IMAGES_TABLE = "caribou_workflow_images_table"
 
 # Global System Region
 GLOBAL_SYSTEM_REGION = "us-west-2"
+GLOBAL_GCP_SYSTEM_REGION = "us-east1"
 
 # Remote CLI Information (Eg. Function, repo name, policy name, etc.)
 REMOTE_CARIBOU_CLI_FUNCTION_NAME = "caribou_cli"

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from collections import defaultdict
 from typing import Optional
 
 import boto3
@@ -28,7 +29,7 @@ class DeploymentPackager:
     def __init__(self, config: Config) -> None:
         self._config = config
         self._pytz_version_cache: Optional[str] = None
-        self._opentelemetry_version_cache: dict[str, str] = {}
+        self._opentelemetry_version_cache: dict[str, Optional[str]] = defaultdict(lambda: None)
 
     def build(self, config: Config, workflow: Workflow) -> None:
         if config.project_dir is None:
@@ -86,20 +87,24 @@ class DeploymentPackager:
                 if "boto3" not in requirements:
                     file.write(f"\nboto3=={boto3.__version__}\n")
             if provider == "gcp":
+                if "boto3" not in requirements:
+                    file.write(f"\nboto3=={boto3.__version__}\n")
                 if "google-cloud" not in requirements:
-                    file.write(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
+                    file.write(f"\ngoogle-cloud==0.34.0\n")
                 if "google-cloud-storage" not in requirements:
                     file.write(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
                 if "google-cloud-firestore" not in requirements:
                     file.write(f"\ngoogle-cloud-firestore=={google.cloud.firestore.__version__}\n")
                 if "google-cloud-pubsub" not in requirements:
-                    file.write(f"\ngoogle-cloud-pubsub=={google.cloud.pubsub.__version__}\n")
+                    file.write(f"\ngoogle-cloud-pubsub==2.29.0\n")
                 if "google-cloud-logging" not in requirements:
-                    file.write(f"\ngoogle-cloud-logging=={google.cloud.logging.__version__}\n")
+                    file.write(f"\ngoogle-cloud-logging=={google.cloud.logging_v2.__version__}\n")
                 if "google-cloud-trace" not in requirements:
-                    file.write(f"\ngoogle-cloud-trace=={google.cloud.trace.__version__}\n")
-                if "google-cloud-profiler" not in requirements:
-                    file.write(f"\ngoogle-cloud-profiler=={googlecloudprofiler.__version__}\n")
+                    file.write(f"\ngoogle-cloud-trace==1.16.1\n")
+                # if "google-cloud-profiler" not in requirements:
+                #     file.write(f"\ngoogle-cloud-profiler==4.1.0\n")
+                if "functions-framework" not in requirements:
+                    file.write(f"\nfunctions-framework==3.*\n")
                 if "opentelemetry-api" not in requirements:
                     opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
                     file.write(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
@@ -135,7 +140,7 @@ class DeploymentPackager:
 
     def _get_opentelemetry_version(self, package_name: str) -> str:
         # opentelemetry sadly does not have a __version__ attribute
-        if package_name not in ("api", "sdk", "exporter-gcp-trace", "exporter-gcp-logging"):
+        if package_name not in ("api", "sdk", "exporter-gcp_trace", "exporter-gcp_logging"):
             raise RuntimeError(f"Not a valid opentelemetry package name: {package_name}")
         if self._opentelemetry_version_cache[f"opentelemetry-{package_name}"] is not None:
             return self._opentelemetry_version_cache[f"opentelemetry-{package_name}"]
@@ -289,20 +294,24 @@ class DeploymentPackager:
                 requirements.append(f"boto3=={boto3.__version__}")
 
         if self._determine_home_provider() == "gcp":
+            if "boto3" not in requirements:
+                requirements.append(f"boto3=={boto3.__version__}")
             if "google-cloud" not in requirements:
-                requirements.append(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
+                requirements.append(f"\ngoogle-cloud==0.34.0\n")
             if "google-cloud-storage" not in requirements:
                 requirements.append(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
             if "google-cloud-firestore" not in requirements:
                 requirements.append(f"\ngoogle-cloud-firestore=={google.cloud.firestore.__version__}\n")
             if "google-cloud-pubsub" not in requirements:
-                requirements.append(f"\ngoogle-cloud-pubsub=={google.cloud.pubsub.__version__}\n")
+                requirements.append(f"\ngoogle-cloud-pubsub==2.29.0\n")
             if "google-cloud-logging" not in requirements:
-                requirements.append(f"\ngoogle-cloud-logging=={google.cloud.logging.__version__}\n")
+                requirements.append(f"\ngoogle-cloud-logging=={google.cloud.logging_v2.__version__}\n")
             if "google-cloud-trace" not in requirements:
-                requirements.append(f"\ngoogle-cloud-trace=={google.cloud.trace.__version__}\n")
-            if "google-cloud-profiler" not in requirements:
-                requirements.append(f"\ngoogle-cloud-profiler=={googlecloudprofiler.__version__}\n")
+                requirements.append(f"\ngoogle-cloud-trace==1.16.1\n")
+            # if "google-cloud-profiler" not in requirements:
+            #     requirements.append(f"\ngoogle-cloud-profiler==4.1.0\n")
+            if "functions-framework" not in requirements:
+                requirements.append(f"\nfunctions-framework==3.*\n")
             if "opentelemetry-api" not in requirements:
                 opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
                 requirements.append(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
@@ -412,6 +421,7 @@ class DeploymentPackager:
 
     def _determine_home_provider(self) -> str:
         home_region = self._config.home_region
+        print(home_region)
         if isinstance(home_region, dict):
             return str(home_region.get("provider", "aws")).lower()
         if isinstance(home_region, str):

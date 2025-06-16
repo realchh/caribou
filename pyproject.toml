@@ -57,6 +57,7 @@ opentelemetry-exporter-gcp-trace = "^1.9.0"
 opentelemetry-api = "^1.34.1"
 opentelemetry-exporter-gcp-logging = "^1.9.0a0"
 google-cloud-resource-manager = "^1.14.2"
+functions-framework = "^3.8.3"
 
 [tool.poetry.extras]
 # This can be used for a more fine-grained dependency management in the future
