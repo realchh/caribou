@@ -487,6 +487,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         COPY requirements.txt ./
         {run_command}
         USER root
+        RUN apt-get update && \
+            apt-get install -y --no-install-recommends \
+                libsqlite3-0 \
+            && rm -rf /var/lib/apt/lists/*
         RUN pip3 install --no-cache-dir -r requirements.txt
         USER app
         COPY app.py ./

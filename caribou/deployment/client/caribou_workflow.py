@@ -102,7 +102,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self.functions: dict[str, CaribouFunction] = {}
         self._run_id_to_successor_index: dict[str, int] = {}
         self._function_names: set[str] = set()
-        self._endpoint = Endpoints()
+        self._endpoint = None
+
         self._current_workflow_placement_decision: dict[str, Any] = {}
 
         # For thread pool -> Invoke successor functions asynchronously
@@ -124,6 +125,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         # Cache the remote clients (one per provider-region pair)
         self._remote_clients: dict[str, RemoteClient] = {}
+
+    def _ensure_endpoint(self) -> Endpoints:
+        if self._endpoint is None:
+            self._endpoint = Endpoints()
+        return self._endpoint
 
     def get_run_id(self) -> str:
         return self._current_workflow_placement_decision["run_id"]
@@ -703,6 +709,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         """
         Get the workflow_placement decision from the platform.
         """
+        self._ensure_endpoint()
         (
             result,
             consumed_read_capacity,

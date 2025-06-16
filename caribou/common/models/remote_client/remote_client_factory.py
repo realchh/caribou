@@ -16,7 +16,7 @@ class RemoteClientFactory:
         if provider_enum == Provider.AWS:
             return AWSRemoteClient(region)
         if provider_enum == Provider.GCP:
-            return GCPRemoteClient(region)
+            return GCPRemoteClient(region=region)
         if provider_enum in [Provider.TEST_PROVIDER1, Provider.TEST_PROVIDER2]:
             return MockRemoteClient()
         if provider_enum == Provider.INTEGRATION_TEST_PROVIDER:
