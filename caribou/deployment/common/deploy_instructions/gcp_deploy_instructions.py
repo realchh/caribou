@@ -96,6 +96,7 @@ class GCPDeployInstructions(DeployInstructions):
             name="create_pubsub_subscription",
             params={
                 "topic": Variable(messaging_topic_identifier_varname),
+                "subscription_name": Variable(subscription_varname),
                 "push_endpoint": Variable(function_varname),
             },
             output_var=subscription_varname,

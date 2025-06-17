@@ -1,7 +1,8 @@
+import base64
 from typing import Any
 
 import json
-import boto3
+from google.cloud import storage
 from tempfile import TemporaryDirectory
 from PIL import Image, ImageFilter
 
@@ -12,8 +13,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Change the following bucket name and region to match your setup
-s3_bucket_name = "caribou-image-processing-benchmark-naufal"
-s3_bucket_region_name = "us-east-1"
+gcp_bucket_name = "caribou-image-processing-benchmark-naufal"
 
 workflow = CaribouWorkflow(name="image_processing", version="0.0.1")
 
@@ -22,8 +22,8 @@ workflow = CaribouWorkflow(name="image_processing", version="0.0.1")
     entry_point=True,
 )
 def get_requests(event: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(event, str):
-        event = json.loads(event)
+    pubsub_message = base64.b64decode(event["data"]).decode("utf-8")
+    event = json.loads(pubsub_message)
 
     if "image_name" in event:
         image_name: str = event["image_name"]
@@ -66,8 +66,8 @@ def get_requests(event: dict[str, Any]) -> dict[str, Any]:
     name="image_processor",
 )
 def image_processor(event: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(event, str):
-        event = json.loads(event)
+    pubsub_message = base64.b64decode(event["data"]).decode("utf-8")
+    event = json.loads(pubsub_message)
 
     if "image_name" in event:
         image_name = event["image_name"]
@@ -77,12 +77,14 @@ def image_processor(event: dict[str, Any]) -> dict[str, Any]:
         desired_transformation = event["desired_transformation"]
 
     # Download the image from S3
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
+
     with TemporaryDirectory() as tmp_dir:
         remote_image_name_path = f"input/{image_name}"
-        s3.download_file(
-            s3_bucket_name, remote_image_name_path, f"{tmp_dir}/{image_name}"
-        )
+
+        bucket = client.bucket(gcp_bucket_name)
+        blob = bucket.blob(remote_image_name_path)
+        blob.download_to_filename(f"{tmp_dir}/{image_name}")
         image = Image.open(f"{tmp_dir}/{image_name}")
         logger.info(f"Performing {desired_transformation} on {image_name}")
         if desired_transformation == "flip":
@@ -105,6 +107,8 @@ def image_processor(event: dict[str, Any]) -> dict[str, Any]:
 
         tmp_result_file = f"{tmp_dir}/result_{image_name}"
         img.save(tmp_result_file, format="JPEG", quality=100)
-        s3.upload_file(tmp_result_file, s3_bucket_name, remote_path)
+        bucket = client.bucket(gcp_bucket_name)
+        blob = bucket.blob(remote_path)
+        blob.upload_from_filename(tmp_result_file)
 
     return {"status": 200}

@@ -27,6 +27,7 @@ from google.cloud.iam_admin_v1 import IAMClient
 from google.oauth2 import service_account
 from google.protobuf import field_mask_pb2
 from google.protobuf.field_mask_pb2 import FieldMask
+from google.pubsub_v1 import PushConfig
 
 from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     CARIBOU_WORKFLOW_IMAGES_TABLE,
@@ -50,7 +51,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     DELAY_TIME = 5
 
     def __init__(
-        self, project_id: str | None = None, region: str | None = None, credentials_path: str | None = None
+        self,
+        project_id: str | None = "caribou-460422",
+        region: str | None = "us-east1",
+        credentials_path: str | None = None,
     ) -> None:
         if credentials_path:
             self._credentials = service_account.Credentials.from_service_account_file(
@@ -98,7 +102,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         name = name.replace("_", "-")
 
-        full_account_name = f"projects/{self._project_id}/serviceAccounts/{name}@{self._project_id}.iam.gserviceaccount.com" # pylint: disable=line-too-long
+        full_account_name = f"projects/{self._project_id}/serviceAccounts/{name}@{self._project_id}.iam.gserviceaccount.com"  # pylint: disable=line-too-long
         print(full_account_name)
         try:
             service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
@@ -768,9 +772,17 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return topic_path
         return response.name
 
-    def subscribe_pubsub_topic(self, topic_path: str, subscription_name) -> str:
+    def create_pubsub_subscription(self, topic: str, subscription_name: str, push_endpoint: str | None = None) -> str:
         client = self._pubsub_subscriber_client
-        response = client.create_subscription(name=subscription_name, topic=topic_path)
+        push_config = None
+
+        if push_endpoint:
+            push_config = PushConfig(push_endpoint=push_endpoint)
+
+        try:
+            response = client.create_subscription(name=subscription_name, topic=topic, push_config=push_config)
+        except google_api_exceptions.AlreadyExists:
+            return subscription_name
         return response.name
 
     def add_pubsub_permission_for_cloud_run(self, service_name: str) -> None:
