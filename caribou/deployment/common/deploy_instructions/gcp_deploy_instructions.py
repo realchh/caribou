@@ -96,7 +96,7 @@ class GCPDeployInstructions(DeployInstructions):
             name="create_pubsub_subscription",
             params={
                 "topic": Variable(messaging_topic_identifier_varname),
-                "subscription_name": Variable(subscription_varname),
+                "subscription_name": subscription_varname,
                 "push_endpoint": Variable(function_varname),
             },
             output_var=subscription_varname,
@@ -105,9 +105,7 @@ class GCPDeployInstructions(DeployInstructions):
     def _add_function_permission_for_messaging_topic_instruction(
         self, messaging_topic_identifier_varname: str, function_varname: str
     ) -> Instruction:
-        # In GCP the subscription already contains the push permission,
-        # so often no additional call is required. Keep a no-op for symmetry.
         return APICall(
-            name="noop",
-            params={},
+            name="add_pubsub_permission_for_cloud_run",
+            params={"service_name": Variable(function_varname),},
         )

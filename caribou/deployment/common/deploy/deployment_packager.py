@@ -90,21 +90,19 @@ class DeploymentPackager:
                 if "boto3" not in requirements:
                     file.write(f"\nboto3=={boto3.__version__}\n")
                 if "google-cloud" not in requirements:
-                    file.write(f"\ngoogle-cloud==0.34.0\n")
+                    file.write("\ngoogle-cloud==0.34.0\n")
                 if "google-cloud-storage" not in requirements:
                     file.write(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
                 if "google-cloud-firestore" not in requirements:
-                    file.write(f"\ngoogle-cloud-firestore=={google.cloud.firestore.__version__}\n")
+                    file.write("\ngoogle-cloud-firestore\n")
                 if "google-cloud-pubsub" not in requirements:
-                    file.write(f"\ngoogle-cloud-pubsub==2.29.0\n")
+                    file.write("\ngoogle-cloud-pubsub\n")
                 if "google-cloud-logging" not in requirements:
-                    file.write(f"\ngoogle-cloud-logging=={google.cloud.logging_v2.__version__}\n")
+                    file.write("\ngoogle-cloud-logging\n")
                 if "google-cloud-trace" not in requirements:
-                    file.write(f"\ngoogle-cloud-trace==1.16.1\n")
-                # if "google-cloud-profiler" not in requirements:
-                #     file.write(f"\ngoogle-cloud-profiler==4.1.0\n")
+                    file.write("\ngoogle-cloud-trace\n")
                 if "functions-framework" not in requirements:
-                    file.write(f"\nfunctions-framework==3.*\n")
+                    file.write("\nfunctions-framework==3.*\n")
                 if "opentelemetry-api" not in requirements:
                     opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
                     file.write(f"\nopentelemetry-api=={opentelemetry_api_version}\n")

@@ -5,7 +5,8 @@
       "roles/pubsub.publisher",
       "roles/datastore.user",
       "roles/storage.objectAdmin",
-      "roles/artifactregistry.reader"
+      "roles/artifactregistry.reader",
+      "roles/run.invoker"
     ]
   }
 }
