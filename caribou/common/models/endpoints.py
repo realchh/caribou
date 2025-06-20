@@ -51,7 +51,6 @@ class Endpoints:  # pylint: disable=too-many-instance-attributes
             )
         return self._deployment_manager_client
 
-
     def get_deployment_algorithm_workflow_placement_decision_client(self) -> RemoteClient:
         if self._deployment_algorithm_workflow_placement_decision_client is None:
             self._deployment_algorithm_workflow_placement_decision_client = RemoteClientFactory.get_remote_client(

@@ -24,9 +24,9 @@ from google.cloud import (  # scheduler_v1,
     storage,
 )
 from google.cloud.iam_admin_v1 import IAMClient
+from google.iam.v1 import policy_pb2
 from google.oauth2 import service_account
 from google.protobuf import field_mask_pb2
-from google.protobuf.field_mask_pb2 import FieldMask
 from google.pubsub_v1 import PushConfig
 
 from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
@@ -86,7 +86,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._iam_admin_client = IAMClient(credentials=self._credentials)
         self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
         self._logging_client = logging_v2.Client(credentials=self._credentials)
-
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
         # Allow for override of the deployment resources bucket (Due to S3 bucket name restrictions)
         self._deployment_resource_bucket: str = os.environ.get(
@@ -168,13 +167,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return None
 
     def resource_exists(self, resource: Resource) -> bool:
-        if resource.resource_type == "service_account" or resource.resource_type == "iam_role":
+        if resource.resource_type in ("service_account", "iam_role"):
             return self.service_account_exists(resource)
-        if resource.resource_type == "cloud_run_service" or resource.resource_type == "function":
+        if resource.resource_type in ("cloud_run_service", "function"):
             return self.cloud_run_service_exists(resource)
-        if resource.resource_type == "artifact_registry_repository" or resource.resource_type == "ecr_repository":
+        if resource.resource_type in ("artifact_registry_repository", "ecr_repository"):
             return self.artifact_registry_repository_exists(resource)
-        if resource.resource_type == "pubsub_topic" or resource.resource_type == "messaging_topic":
+        if resource.resource_type in ("pubsub_topic", "messaging_topic"):
             return False
         raise RuntimeError(f"Unknown resource type {resource.resource_type}")
 
@@ -235,7 +234,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     {"name": ttl_field_path, "ttl_config": firestore_admin_v1.Field.TtlConfig()}
                 )
                 request = firestore_admin_v1.UpdateFieldRequest(
-                    {"field": ttl_field, "update_mask": field_mask_pb2.FieldMask(paths=["ttl_config"])}
+                    {
+                        "field": ttl_field,
+                        "update_mask": field_mask_pb2.FieldMask(  # pylint: disable=maybe-no-member
+                            paths=["ttl_config"]
+                        ),
+                    }
                 )
                 admin_client.update_field(request=request)
 
@@ -428,7 +432,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.AlreadyExists:
             existing = client.get_service(name=full_name)
             existing.template = template
-            mask = FieldMask(paths=["template"])
+            mask = field_mask_pb2.FieldMask(paths=["template"])  # pylint: disable=maybe-no-member
             op = client.update_service(service=existing, update_mask=mask)
             logger.info("Cloud Run service %s updated successfully.", service_name)
 
@@ -488,6 +492,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return f"""
         FROM {self._region}-docker.pkg.dev/serverless-runtimes/google-22/runtimes/python312
+        WORKDIR /app        
+        ENV PYTHONPATH /app
         COPY requirements.txt ./
         {run_command}
         USER root
@@ -496,11 +502,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 libsqlite3-0 \
             && rm -rf /var/lib/apt/lists/*
         RUN pip3 install --no-cache-dir -r requirements.txt
-        USER app
         COPY app.py ./
         COPY src ./src
         COPY caribou ./caribou
-        CMD ["functions-framework", "--source", "{source_file}", "--target", "{target_function}"]
+        CMD ["functions-framework", \
+        "--source", "{source_file}", \
+        "--target", "{target_function}", \
+        "--signature-type", "event"]
         """
 
     def _build_docker_image(self, context_path: str, image_name: str) -> None:
@@ -671,6 +679,21 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 project_policy.bindings.add(role=role, members=[policy_member])
 
         project_client.set_iam_policy(request={"resource": f"projects/{self._project_id}", "policy": project_policy})
+
+        service_account_policy = client.get_iam_policy(resource=service_account_name)
+
+        project_number = self._resource_manager_client.get_project(name=f"projects/{self._project_id}").name.split("/")[
+            1
+        ]
+        pubsub_service_account = f"serviceAccount:service-{project_number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+        service_account_policy.bindings.append(
+            policy_pb2.Binding(  # pylint: disable=maybe-no-member
+                role="roles/iam.serviceAccountTokenCreator", members=[pubsub_service_account]
+            )
+        )
+
+        client.set_iam_policy(request={"resource": service_account_name, "policy": service_account_policy})
         return self.get_service_account(service_account_email)
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict | None = None) -> str:
@@ -774,28 +797,50 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def create_pubsub_subscription(self, topic: str, subscription_name: str, push_endpoint: str | None = None) -> str:
         client = self._pubsub_subscriber_client
-        push_config = None
 
-        if push_endpoint:
-            push_config = PushConfig(push_endpoint=push_endpoint)
+        service_name = push_endpoint.split("https://", 1)[1]
+        service_name = service_name.split(".", 1)[0]
+        service_name = "-".join(service_name.split("-")[:-2])
+        service_name = service_name[:30]
+
+        run_service_email = f"{service_name}@{self._project_id}.iam.gserviceaccount.com"
+        print(run_service_email)
+        push_config = PushConfig(
+            push_endpoint=push_endpoint,
+            oidc_token=PushConfig.OidcToken(service_account_email=run_service_email, audience=push_endpoint),
+        )
+
+        subscription_path = client.subscription_path(project=self._project_id, subscription=subscription_name)
 
         try:
-            response = client.create_subscription(name=subscription_name, topic=topic, push_config=push_config)
+            response = client.create_subscription(name=subscription_path, topic=topic, push_config=push_config)
         except google_api_exceptions.AlreadyExists:
-            return subscription_name
+            return subscription_path
         return response.name
 
     def add_pubsub_permission_for_cloud_run(self, service_name: str) -> None:
         client = self._run_client
+        service_name = service_name.split("https://", 1)[1]
+        service_name = service_name.split(".", 1)[0]
+        service_name = "-".join(service_name.split("-")[:-2])
         full_name = client.service_path(self._project_id, self._region, service_name)
+        print(full_name)
         policy = client.get_iam_policy(request={"resource": full_name})
-        invoker_member = f"serviceAccount:service-{self._project_id}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+        run_service_email = f"{service_name[:30]}@{self._project_id}.iam.gserviceaccount.com"
+        invoker_member = f"serviceAccount:{run_service_email}"
+        print(invoker_member)
 
         for binding in policy.bindings:
             if binding.role == "roles/run.invoker" and invoker_member in binding.members:
                 return
 
-        policy.bindings.append({"role": "roles/run.invoker", "members": [invoker_member]})
+        print(policy.bindings)
+        new_binding = policy_pb2.Binding(  # pylint: disable=maybe-no-member
+            role="roles/run.invoker", members=[invoker_member]
+        )
+        policy.bindings.append(new_binding)
+        print(policy.bindings)
         client.set_iam_policy(request={"resource": full_name, "policy": policy})
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
@@ -1183,50 +1228,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
 
 # if __name__ == "__main__":
-# gcp_remote_client = GCPRemoteClient(project_id="caribou-460422", region="us-east1")
-# # print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
-# IAM_POLICY = """
-# {
-#   "gcp": {
-#     "roles": [
-#       "roles/logging.logWriter",
-#       "roles/pubsub.publisher"
-#     ]
-#   }
-# }
-# """
+#     gcp_remote_client = GCPRemoteClient(project_id="caribou-460422", region="us-east1")
+#     # print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
+#     resource_client = gcp_remote_client._resource_manager_client
+#     project_number = resource_client.get_project(name=f"projects/{gcp_remote_client._project_id}").name.split("/")[1]
+#     print(project_number)
 #
-# iam_policy_2 = """
-# {
-#   "gcp": {
-#     "roles": [
-#       "roles/logging.logWriter"
-#     ]
-#   }
-# }
-# """
-# gcp_remote_client.create_sync_tables()
-# db = firestore.Client()
-# doc = db.collection("sync_messages_table").document("dummy")
-# doc.set({"data":"ping", "expires_at": datetime.utcnow()})
-# sa = gcp_remote_client.create_role("caribou-runtime", iam_policy, {})
-# sa = gcp_remote_client.update_role("caribou-runtime", iam_policy_2, {})
-# gcp_remote_client.remove_role("caribou-runtime")
-# sa = gcp_remote_client.get_cloud_run_service(service_name="visualize")
-# print("SA:", sa)
-# os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8787"
-# gcp_remote_client.set_predecessor_reached("A", "sync1", "wf-X", False)
-# gcp_remote_client.set_predecessor_reached("B", "sync1", "wf-X", True)
-#
-# db = firestore.Client(project="demo-proj")
-# doc = db.collection("caribou_sync_counters").document("wf-X").get()
-# print(doc.to_dict())
-# gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "hello")
-# gcp_remote_client.upload_predecessor_data_at_sync_node("fnA", "wf-1", "world")
-#
-# doc = gcp_remote_client._firestore_client.collection(SYNC_MESSAGES_TABLE) \
-#     .document("fnA:wf-1").get().to_dict()
-
-# msgs, cap = gcp_remote_client.get_predecessor_data("fnA", "wf-1")
-# print(msgs)
-# print(cap)
+#     gcp_remote_client.create_pubsub_subscription(
+#         "dna_visualization-0_1_0-visualize_gcp-us-east1_messaging_topic",
+#         "dna_visualization-0_1_0-visualize_gcp-us-east1_messaging_subscription",
+#         "https://dna-visualization-0-1-0-visualize-gcp-us-east1-es6wskpkmq-ue.a.run.app",
+#     )

@@ -14,7 +14,6 @@ from typing import Optional
 
 import boto3
 import google.cloud.storage
-import googlecloudprofiler
 import pip
 import yaml
 import zstandard
@@ -74,6 +73,8 @@ class DeploymentPackager:
             self._add_requirements_file(z, requirements_filename)
         return package_filename
 
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
     def _ensure_requirements_filename_complete(self, requirements_filename: str) -> None:
         with open(requirements_filename, "r", encoding="utf-8") as file:
             requirements = file.read().splitlines()
@@ -101,6 +102,18 @@ class DeploymentPackager:
                     file.write("\ngoogle-cloud-logging\n")
                 if "google-cloud-trace" not in requirements:
                     file.write("\ngoogle-cloud-trace\n")
+                if "google-cloud-artifact-registry" not in requirements:
+                    file.write("\ngoogle-cloud-artifact-registry\n")
+                if "google-cloud-eventarc" not in requirements:
+                    file.write("\ngoogle-cloud-eventarc\n")
+                if "google-cloud-iam" not in requirements:
+                    file.write("\ngoogle-cloud-iam\n")
+                if "google-cloud-resource-manager" not in requirements:
+                    file.write("\ngoogle-cloud-resource-manager\n")
+                if "google-cloud-run" not in requirements:
+                    file.write("\ngoogle-cloud-run\n")
+                if "types-protobuf" not in requirements:
+                    file.write("\ntypes-protobuf\n")
                 if "functions-framework" not in requirements:
                     file.write("\nfunctions-framework==3.*\n")
                 if "opentelemetry-api" not in requirements:
@@ -193,6 +206,7 @@ class DeploymentPackager:
             ("utils.py",),
             ("models", "remote_client", "__init__.py"),
             ("models", "remote_client", "aws_remote_client.py"),
+            ("models", "remote_client", "gcp_remote_client.py"),
             ("models", "remote_client", "integration_test_remote_client.py"),
             ("models", "remote_client", "mock_remote_client.py"),
             ("models", "remote_client", "remote_client.py"),
@@ -282,6 +296,8 @@ class DeploymentPackager:
     def _create_deployment_package_dir(self, package_filename: str) -> None:
         os.makedirs(os.path.dirname(package_filename), exist_ok=True)
 
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
     def _build_dependencies(self, requirements_filename: str, temp_dir: str) -> None:
         with open(requirements_filename, "r", encoding="utf-8") as file:
             requirements = file.read().splitlines()
@@ -295,21 +311,31 @@ class DeploymentPackager:
             if "boto3" not in requirements:
                 requirements.append(f"boto3=={boto3.__version__}")
             if "google-cloud" not in requirements:
-                requirements.append(f"\ngoogle-cloud==0.34.0\n")
+                requirements.append("\ngoogle-cloud==0.34.0\n")
             if "google-cloud-storage" not in requirements:
                 requirements.append(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
             if "google-cloud-firestore" not in requirements:
-                requirements.append(f"\ngoogle-cloud-firestore=={google.cloud.firestore.__version__}\n")
+                requirements.append("\ngoogle-cloud-firestore\n")
             if "google-cloud-pubsub" not in requirements:
-                requirements.append(f"\ngoogle-cloud-pubsub==2.29.0\n")
+                requirements.append("\ngoogle-cloud-pubsub==2.29.0\n")
             if "google-cloud-logging" not in requirements:
-                requirements.append(f"\ngoogle-cloud-logging=={google.cloud.logging_v2.__version__}\n")
+                requirements.append("\ngoogle-cloud-logging\n")
             if "google-cloud-trace" not in requirements:
-                requirements.append(f"\ngoogle-cloud-trace==1.16.1\n")
-            # if "google-cloud-profiler" not in requirements:
-            #     requirements.append(f"\ngoogle-cloud-profiler==4.1.0\n")
+                requirements.append("\ngoogle-cloud-trace==1.16.1\n")
+            if "google-cloud-artifact-registry" not in requirements:
+                requirements.append("\ngoogle-cloud-artifact-registry\n")
+            if "google-cloud-eventarc" not in requirements:
+                requirements.append("\ngoogle-cloud-eventarc\n")
+            if "google-cloud-iam" not in requirements:
+                requirements.append("\ngoogle-cloud-iam\n")
+            if "google-cloud-resource-manager" not in requirements:
+                requirements.append("\ngoogle-cloud-resource-manager\n")
+            if "google-cloud-run" not in requirements:
+                requirements.append("\ngoogle-cloud-run\n")
+            if "types-protobuf" not in requirements:
+                requirements.append("\ntypes-protobuf\n")
             if "functions-framework" not in requirements:
-                requirements.append(f"\nfunctions-framework==3.*\n")
+                requirements.append("\nfunctions-framework==3.*\n")
             if "opentelemetry-api" not in requirements:
                 opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
                 requirements.append(f"\nopentelemetry-api=={opentelemetry_api_version}\n")

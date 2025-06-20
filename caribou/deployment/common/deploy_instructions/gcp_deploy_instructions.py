@@ -107,5 +107,7 @@ class GCPDeployInstructions(DeployInstructions):
     ) -> Instruction:
         return APICall(
             name="add_pubsub_permission_for_cloud_run",
-            params={"service_name": Variable(function_varname),},
+            params={
+                "service_name": Variable(function_varname),
+            },
         )

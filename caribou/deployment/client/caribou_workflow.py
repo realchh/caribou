@@ -1030,8 +1030,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         # Get the current region and provider
         # TODO: support GCP
-        current_region: str = os.environ["AWS_REGION"]
-        current_provider: str = str(Provider.AWS.value)
+        current_region: str = ""
+        current_provider: str = ""
+
+        if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
+            current_provider = str(Provider.AWS.value)
+            current_region = os.environ.get("AWS_REGION")
+        elif "K_SERVICE" in os.environ:
+            current_provider = str(Provider.GCP.value)
+            current_region = os.environ.get("FUNCTION_REGION")
 
         # Generate a unique transmission taint for the redirection
         transmission_taint = uuid.uuid4().hex
@@ -1124,8 +1131,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         # Get the current region and provider
         # TODO: support GCP
-        current_region: str = os.environ["AWS_REGION"]
-        current_provider: str = str(Provider.AWS.value)
+        current_region: str = ""
+        current_provider: str = ""
+
+        if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
+            current_provider = str(Provider.AWS.value)
+            current_region = os.environ.get("AWS_REGION")
+        elif "K_SERVICE" in os.environ:
+            current_provider = str(Provider.GCP.value)
+            current_region = os.environ.get("FUNCTION_REGION")
 
         # Check if the current function is indeed placed in the
         # desired region (And if it will need to redirect)
@@ -1222,7 +1236,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             # TODO: Make this error message more informative
             raise RuntimeError(
                 "Something went wrong, the input is not valid and was ",
-                "not converted to a dictioanry. Please refer to documentation "
+                "not converted to a dictionary. Please refer to documentation "
                 f"for accepted format. Type: {type(argument_raw)}, Argument: {argument_raw}.",
             )
 
