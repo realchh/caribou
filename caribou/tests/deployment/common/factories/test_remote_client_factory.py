@@ -1,5 +1,6 @@
 import unittest
 from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
+from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 
 
@@ -30,8 +31,8 @@ class TestRemoteClientFactory(unittest.TestCase):
         region = "region1"
 
         # Act & Assert
-        with self.assertRaises(NotImplementedError):
-            RemoteClientFactory.get_remote_client(provider, region)
+        remote_client = RemoteClientFactory.get_remote_client(provider, region)
+        self.assertIsInstance(remote_client, GCPRemoteClient)
 
 
 if __name__ == "__main__":

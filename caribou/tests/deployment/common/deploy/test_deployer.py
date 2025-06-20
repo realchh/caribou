@@ -1,5 +1,7 @@
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import Mock, patch, mock_open, MagicMock
 from botocore.exceptions import ClientError
+
+from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.deploy.models.resource import Resource
 from caribou.deployment.common.deploy.models.workflow import Workflow
@@ -149,23 +151,29 @@ class TestDeployer(unittest.TestCase):
             )
 
     def test_upload_deployment_package_resource(self):
+        endpoints_mock = MagicMock()
+        remote_client_mock = MagicMock(spec=RemoteClient)
+        endpoints_mock.get_deployment_resources_client.return_value = remote_client_mock
+
         config = Config({"workflow_id": "test_id"}, self.test_dir)
         workflow_builder = Mock()
         deployment_packager = Mock()
         executor = Mock()
         deployer = Deployer(config, workflow_builder, deployment_packager, executor)
+        deployer._endpoints = endpoints_mock
 
         workflow = Mock(spec=Workflow)
-        deployment_package = Mock(filename="test_deployment_package")
+        deployment_package = Mock(filename="path/to/test_package.zip", resource_key="deployment_package_test_id")
         workflow.get_deployment_packages = Mock(return_value=[deployment_package])
 
         deployer._workflow = workflow
 
-        with patch.object(AWSRemoteClient, "upload_resource") as upload_resource:
-            with patch("builtins.open", mock_open(read_data=b"test_deployment_package")) as open_file:
-                deployer._upload_deployment_package_resource()
+        with patch("builtins.open", mock_open(read_data=b"test_deployment_package")) as open_file:
+            deployer._upload_deployment_package_resource()
 
-            upload_resource.assert_called_once_with("deployment_package_test_id", b"test_deployment_package")
+        remote_client_mock.upload_resource.assert_called_once_with(
+            deployment_package.resource_key, b"test_deployment_package"
+        )
 
     def test_get_workflow_already_deployed(self):
         config = Mock()

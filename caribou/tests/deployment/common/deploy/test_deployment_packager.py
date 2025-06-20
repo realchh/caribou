@@ -100,14 +100,14 @@ class TestDeploymentPackager(unittest.TestCase):
         self.assertEqual(mock_zipfile.write.call_count, 2)
 
     @patch("zipfile.ZipFile")
-    def test__add_mutli_x_serverless_dependency(self, mock_zipfile):
+    def test__add_multi_x_serverless_dependency(self, mock_zipfile):
         mock_zipfile.return_value.__enter__.return_value = MagicMock()
 
         config = MagicMock()
         packager = DeploymentPackager(config)
         packager._add_caribou_dependency(mock_zipfile)
 
-        self.assertEqual(mock_zipfile.write.call_count, 22)
+        self.assertEqual(mock_zipfile.write.call_count, 23)
 
     @patch.object(DeploymentPackager, "_download_deployment_package", return_value="test.zip")
     def test_re_build(self, mock_download_deployment_package):

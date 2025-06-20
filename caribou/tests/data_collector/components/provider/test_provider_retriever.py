@@ -9,13 +9,21 @@ import os
 
 class TestProviderRetriever(unittest.TestCase):
     def setUp(self):
-        self.remote_client = MagicMock(spec=RemoteClient)
-
-        with patch("os.environ.get") as mock_os_environ_get, patch("boto3.client") as mock_boto3, patch(
-            "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
+        with (
+            patch("boto3.client") as mock_boto3,
+            patch("caribou.common.utils.str_to_bool") as mock_str_to_bool,
+            patch("googlemaps.Client") as mock_googlemaps_client,
+            patch("google.cloud.billing_v1.CloudCatalogClient") as mock_google_cloud_catalog_client,
+            patch("google.cloud.billing_v1.CloudBillingClient") as mock_google_cloud_billing_client,
+        ):
+            self.remote_client = MagicMock(spec=RemoteClient)
             mock_boto3.return_value = MagicMock()
-            mock_os_environ_get.return_value = "test_key"
+
+            test_environment = {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False"}
+
+            self.env_patcher = patch.dict("os.environ", test_environment)
+            self.env_patcher.start()
+
             mock_str_to_bool.return_value = False
             self.provider_retriever = ProviderRetriever(self.remote_client)
 
@@ -256,11 +264,13 @@ class TestProviderRetriever(unittest.TestCase):
 
         with patch("os.environ.get") as mock_os_environ_get, patch("boto3.client") as mock_boto3, patch(
             "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
+        ) as mock_str_to_bool, patch.object(ProviderRetriever, "__init__", lambda x, y: None) as mock_init:
             mock_boto3.return_value = MagicMock()
             mock_os_environ_get.return_value = "test_key"
             mock_str_to_bool.return_value = False
             provider_retriever = ProviderRetriever(None)  # Assuming None can be passed as a dummy RemoteClient
+            provider_retriever._aws_region_name_to_code = {}
+            provider_retriever._google_api_key = "mock_api_key"
 
             provider_retriever._retrieve_enabled_aws_regions = Mock(return_value=["us-east-1", "us-west-1"])
 
@@ -384,12 +394,16 @@ class TestProviderRetriever(unittest.TestCase):
         self.assertTrue("Could not find any tables on the AWS regions page" in str(context.exception))
 
     @patch("caribou.data_collector.components.provider.provider_retriever.ProviderRetriever.retrieve_aws_regions")
-    def test_retrieve_available_regions(self, mock_retrieve_aws_regions):
+    @patch("caribou.data_collector.components.provider.provider_retriever.ProviderRetriever.retrieve_gcp_regions")
+    def test_retrieve_available_regions(self, mock_retrieve_aws_regions, mock_retrieve_gcp_regions):
         mock_retrieve_aws_regions.return_value = {"aws:dummy_region": {"code": "dummy_region"}}
+        mock_retrieve_gcp_regions.return_value = {"gcp:dummy_region2": {"code": "dummy_region2"}}
 
         result = self.provider_retriever.retrieve_available_regions()
         self.assertIn("aws:dummy_region", result)
+        self.assertIn("gcp:dummy_region2", result)
         self.assertEqual(result["aws:dummy_region"]["code"], "dummy_region")
+        self.assertEqual(result["gcp:dummy_region2"]["code"], "dummy_region2")
 
     @patch("caribou.data_collector.components.provider.provider_retriever.boto3.client")
     @patch("requests.get")
@@ -519,9 +533,9 @@ class TestProviderRetriever(unittest.TestCase):
                     "unit": "USD",
                 },
                 "ecr_cost": {"ecr_cost": 0.1},
-                "pue": 1.11,
+                "pue": 1.135,
                 "cfe": 0.0,
-                "average_memory_power": 0.0003725,
+                "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.0035,
                 "min_cpu_power_kWh": 0.00074,
                 "available_architectures": ["arm64", "x86"],
@@ -540,9 +554,9 @@ class TestProviderRetriever(unittest.TestCase):
                     "unit": "USD",
                 },
                 "ecr_cost": {"ecr_cost": 0.15},
-                "pue": 1.11,
+                "pue": 1.135,
                 "cfe": 0.0,
-                "average_memory_power": 0.0003725,
+                "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.0035,
                 "min_cpu_power_kWh": 0.00074,
                 "available_architectures": ["arm64", "x86"],
@@ -838,6 +852,15 @@ class TestProviderRetriever(unittest.TestCase):
 
     @patch("caribou.data_collector.components.provider.provider_retriever.boto3.client")
     def test_retrieve_enabled_aws_regions_success(self, mock_boto3_client):
+        with patch("os.environ.get") as mock_os_environ_get, patch(
+            "caribou.common.utils.str_to_bool"
+        ) as mock_str_to_bool, patch.object(ProviderRetriever, "__init__", lambda x, y: None):
+            mock_os_environ_get.return_value = "test_key"
+            mock_str_to_bool.return_value = False
+            provider_retriever = ProviderRetriever(None)
+
+        provider_retriever._google_api_key = "mock_api_key"
+
         mock_ec2_client = MagicMock()
 
         mock_boto3_client.return_value = mock_ec2_client
@@ -850,12 +873,7 @@ class TestProviderRetriever(unittest.TestCase):
             ]
         }
 
-        with patch("os.environ.get") as mock_os_environ_get, patch(
-            "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
-            mock_os_environ_get.return_value = "test_key"
-            mock_str_to_bool.return_value = False
-            provider_retriever = ProviderRetriever(client=mock_boto3_client)
+        provider_retriever._aws_ec2_client = mock_ec2_client
 
         expected_regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
@@ -864,17 +882,21 @@ class TestProviderRetriever(unittest.TestCase):
 
     @patch("caribou.data_collector.components.provider.provider_retriever.boto3.client")
     def test_retrieve_enabled_aws_regions_empty(self, mock_boto3_client):
+        with patch("os.environ.get") as mock_os_environ_get, patch(
+            "caribou.common.utils.str_to_bool"
+        ) as mock_str_to_bool, patch.object(ProviderRetriever, "__init__", lambda x, y: None):
+            mock_os_environ_get.return_value = "test_key"
+            mock_str_to_bool.return_value = False
+            provider_retriever = ProviderRetriever(None)
+
+        provider_retriever._google_api_key = "mock_api_key"
+
         mock_ec2_client = MagicMock()
         mock_boto3_client.return_value = mock_ec2_client
 
         mock_ec2_client.describe_regions.return_value = {"Regions": []}
 
-        with patch("os.environ.get") as mock_os_environ_get, patch(
-            "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
-            mock_os_environ_get.return_value = "test_key"
-            mock_str_to_bool.return_value = False
-            provider_retriever = ProviderRetriever(client=mock_boto3_client)
+        provider_retriever._aws_ec2_client = mock_ec2_client
 
         expected_regions = []
 
@@ -883,17 +905,21 @@ class TestProviderRetriever(unittest.TestCase):
 
     @patch("caribou.data_collector.components.provider.provider_retriever.boto3.client")
     def test_retrieve_enabled_aws_regions_api_failure(self, mock_boto3_client):
+        with patch("os.environ.get") as mock_os_environ_get, patch(
+            "caribou.common.utils.str_to_bool"
+        ) as mock_str_to_bool, patch.object(ProviderRetriever, "__init__", lambda x, y: None):
+            mock_os_environ_get.return_value = "test_key"
+            mock_str_to_bool.return_value = False
+            provider_retriever = ProviderRetriever(None)
+
+        provider_retriever._google_api_key = "mock_api_key"
+
         mock_ec2_client = MagicMock()
         mock_boto3_client.return_value = mock_ec2_client
 
         mock_ec2_client.describe_regions.side_effect = Exception("AWS API error")
 
-        with patch("os.environ.get") as mock_os_environ_get, patch(
-            "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
-            mock_os_environ_get.return_value = "test_key"
-            mock_str_to_bool.return_value = False
-            provider_retriever = ProviderRetriever(client=mock_boto3_client)
+        provider_retriever._aws_ec2_client = mock_ec2_client
 
         with self.assertRaises(Exception) as context:
             provider_retriever._retrieve_enabled_aws_regions()

@@ -7,11 +7,14 @@ from caribou.data_collector.components.provider.provider_collector import Provid
 
 class TestProviderCollector(unittest.TestCase):
     def setUp(self):
-        with patch("os.environ.get") as mock_os_environ_get, patch("boto3.client") as mock_boto3, patch(
-            "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
+        with patch("boto3.client") as mock_boto3, patch("caribou.common.utils.str_to_bool") as mock_str_to_bool:
             mock_boto3.return_value = MagicMock()
-            mock_os_environ_get.return_value = "test_key"
+
+            test_environment = {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False"}
+
+            self.env_patcher = patch.dict("os.environ", test_environment)
+            self.env_patcher.start()
+
             mock_str_to_bool.return_value = False
 
             # Need to do the above as issue with Provider Retriever constructor
