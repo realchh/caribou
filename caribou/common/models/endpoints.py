@@ -10,14 +10,21 @@ from caribou.common.utils import str_to_bool
 
 class Endpoints:  # pylint: disable=too-many-instance-attributes
     def __init__(self) -> None:
-        self._provider = Provider.GCP.value
         global_system_region = GLOBAL_GCP_SYSTEM_REGION
 
         integration_test_on = str_to_bool(os.environ.get("INTEGRATIONTEST_ON", "False"))
+        self._provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
 
         if integration_test_on:
             self._provider = Provider.INTEGRATION_TEST_PROVIDER.value
             global_system_region = INTEGRATION_TEST_SYSTEM_REGION
+        else:
+            if self._provider == Provider.GCP.value:
+                global_system_region = GLOBAL_GCP_SYSTEM_REGION
+            elif self._provider == Provider.AWS.value:
+                global_system_region = GLOBAL_SYSTEM_REGION
+            else:
+                raise ValueError(f"Unknown provider {self._provider}")
 
         # TODO (#56): Implement retrieval of deployer server and update checker regions
         self._deployment_server_region = global_system_region

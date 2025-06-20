@@ -9,6 +9,11 @@ from caribou.data_collector.components.carbon.carbon_collector import CarbonColl
 class TestCarbonCollector(unittest.TestCase):
     def setUp(self):
         self.config = {"carbon_transmission_cost_calculator": "distance"}
+
+        environment_vars = {
+            "ELECTRICITY_MAPS_AUTH_TOKEN": "mock_token",
+            "CARIBOU_DEFAULT_PROVIDER": "aws"
+        }
         with patch("os.environ.get") as mock_os_environ_get:
             mock_os_environ_get.return_value = "mock_token"
             self.carbon_collector = CarbonCollector()

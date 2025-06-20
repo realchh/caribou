@@ -38,18 +38,21 @@ class TestEndpoints(unittest.TestCase):
         with patch.dict("os.environ", {"INTEGRATIONTEST_ON": "True"}):
             endpoints = Endpoints()
 
+            deployment_client = endpoints.get_deployment_resources_client()
+            manager_client = endpoints.get_deployment_manager_client()
+            workflow_placement_client = endpoints.get_deployment_algorithm_workflow_placement_decision_client()
+            collector_client = endpoints.get_data_collector_client()
+            datastore_client = endpoints.get_datastore_client()
+
             # Assertions for Integration Test provider
             mock_get_remote_client.assert_any_call(
                 Provider.INTEGRATION_TEST_PROVIDER.value, INTEGRATION_TEST_SYSTEM_REGION
             )
-            self.assertEqual(endpoints.get_deployment_resources_client(), mock_get_remote_client.return_value)
-            self.assertEqual(endpoints.get_deployment_manager_client(), mock_get_remote_client.return_value)
-            self.assertEqual(
-                endpoints.get_deployment_algorithm_workflow_placement_decision_client(),
-                mock_get_remote_client.return_value,
-            )
-            self.assertEqual(endpoints.get_data_collector_client(), mock_get_remote_client.return_value)
-            self.assertEqual(endpoints.get_datastore_client(), mock_get_remote_client.return_value)
+            self.assertEqual(deployment_client, mock_get_remote_client.return_value)
+            self.assertEqual(manager_client, mock_get_remote_client.return_value)
+            self.assertEqual(workflow_placement_client, mock_get_remote_client.return_value)
+            self.assertEqual(collector_client, mock_get_remote_client.return_value)
+            self.assertEqual(datastore_client, mock_get_remote_client.return_value)
 
     def test_get_deployment_resources_client(self):
         with patch.object(
