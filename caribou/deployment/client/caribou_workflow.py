@@ -102,7 +102,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self.functions: dict[str, CaribouFunction] = {}
         self._run_id_to_successor_index: dict[str, int] = {}
         self._function_names: set[str] = set()
-        self._endpoint = None
+        self._endpoint: Endpoints | None = None
 
         self._current_workflow_placement_decision: dict[str, Any] = {}
 
@@ -709,11 +709,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         """
         Get the workflow_placement decision from the platform.
         """
-        self._ensure_endpoint()
+        endpoint = self._ensure_endpoint()
         (
             result,
             consumed_read_capacity,
-        ) = self._endpoint.get_deployment_algorithm_workflow_placement_decision_client().get_value_from_table(
+        ) = endpoint.get_deployment_algorithm_workflow_placement_decision_client().get_value_from_table(
             WORKFLOW_PLACEMENT_DECISION_TABLE, f"{self.name}-{self.version}"
         )
         if result is not None:
@@ -1035,10 +1035,10 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
             current_provider = str(Provider.AWS.value)
-            current_region = os.environ.get("AWS_REGION")
+            current_region = os.environ.get("AWS_REGION", "")
         elif "K_SERVICE" in os.environ:
             current_provider = str(Provider.GCP.value)
-            current_region = os.environ.get("FUNCTION_REGION")
+            current_region = os.environ.get("FUNCTION_REGION", "")
 
         # Generate a unique transmission taint for the redirection
         transmission_taint = uuid.uuid4().hex
@@ -1136,10 +1136,10 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
             current_provider = str(Provider.AWS.value)
-            current_region = os.environ.get("AWS_REGION")
+            current_region = os.environ.get("AWS_REGION", "")
         elif "K_SERVICE" in os.environ:
             current_provider = str(Provider.GCP.value)
-            current_region = os.environ.get("FUNCTION_REGION")
+            current_region = os.environ.get("FUNCTION_REGION", "")
 
         # Check if the current function is indeed placed in the
         # desired region (And if it will need to redirect)

@@ -151,19 +151,29 @@ class DeploymentPackager:
 
     def _get_opentelemetry_version(self, package_name: str) -> str:
         # opentelemetry sadly does not have a __version__ attribute
-        if package_name not in ("api", "sdk", "exporter-gcp_trace", "exporter-gcp_logging"):
+        valid_packages = ("api", "sdk", "exporter-gcp_trace", "exporter-gcp_logging")
+
+        if package_name not in valid_packages:
             raise RuntimeError(f"Not a valid opentelemetry package name: {package_name}")
-        if self._opentelemetry_version_cache[f"opentelemetry-{package_name}"] is not None:
-            return self._opentelemetry_version_cache[f"opentelemetry-{package_name}"]
+
+        pypi_package_name = f"opentelemetry-{package_name}"
+
+        result_from_cache = self._opentelemetry_version_cache[pypi_package_name]
+        if result_from_cache:
+            return result_from_cache
+
         opentelemetry_version = subprocess.check_output(
-            [sys.executable, "-m", "pip", "show", f"opentelemetry-{package_name}"]
+            [sys.executable, "-m", "pip", "show", pypi_package_name]
         ).decode("utf-8")
+
         opentelemetry_version = next(
             line.split(":")[1].strip() for line in opentelemetry_version.splitlines() if line.startswith("Version:")
         )
+
         if opentelemetry_version is None:
             raise RuntimeError("Could not find opentelemetry version")
-        self._opentelemetry_version_cache[f"opentelemetry-{package_name}"] = opentelemetry_version
+
+        self._opentelemetry_version_cache[pypi_package_name] = opentelemetry_version
         return opentelemetry_version
 
     def _add_requirements_file(self, zip_file: zipfile.ZipFile, requirements_filename: str) -> None:

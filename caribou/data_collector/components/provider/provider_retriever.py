@@ -525,6 +525,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         return dynamodb_cost_dict
 
+    # pylint: disable=too-many-branches
     def _retrieve_gcp_firestore_cost(self, available_region: list[str]) -> dict[str, Any]:
         client = self._gcp_catalog_client
 
@@ -534,9 +535,12 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 firestore_svc = svc
                 break
 
+        if firestore_svc is None:
+            raise RuntimeError("Could not find Firestore service from GCP Catalog")
+
         available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
 
-        firestore_storage_cost_dict = defaultdict(
+        firestore_storage_cost_dict: dict[str, dict[str, float | str]] = defaultdict(
             lambda: {
                 "read_request_cost": -1.0,  # USD per 100,000 reads
                 "write_request_cost": -1.0,  # USD per 100,000 writes
@@ -664,9 +668,12 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 artifact_registry_svc = svc
                 break
 
+        if artifact_registry_svc is None:
+            raise RuntimeError("Could not find artifact registry service from GCP Catalog")
+
         available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
 
-        artifact_registry_cost_dict = defaultdict(
+        artifact_registry_cost_dict: dict[str, dict[str, float | str]] = defaultdict(
             lambda: {
                 "storage_cost": 0.0,
                 "unit": "USD",
@@ -921,7 +928,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         available_region_code = {region_key.split(":")[1]: region_key for region_key in available_region}
 
-        data_by_region = defaultdict(
+        data_by_region: dict[str, dict[str, Any]] = defaultdict(
             lambda: {
                 "invocation_cost": {},
                 "compute_cost": {},
@@ -1021,12 +1028,24 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         }
 
         if region_code in tier1_regions:
+            cpu_price_s = tier1_pricing.get("cpu")
+            mem_price_gb_s = tier1_pricing.get("mem")
+            if cpu_price_s:
+                free_tier_cpu_s = 4.32 / cpu_price_s
+            else:
+                free_tier_cpu_s = 240000
+
+            if mem_price_gb_s:
+                free_tier_compute_gb_s = 0.9 / mem_price_gb_s
+            else:
+                free_tier_compute_gb_s = 450000
+
             return {
                 "compute_cost": {
-                    "cpu_s": tier1_pricing.get("cpu"),
-                    "memory_gb_s": tier1_pricing.get("mem"),
-                    "free_tier_compute_gb_s": 0.9 / tier1_pricing.get("mem"),
-                    "free_tier_cpu_s": 4.32 / tier1_pricing.get("cpu"),
+                    "cpu_s": cpu_price_s,
+                    "memory_gb_s": mem_price_gb_s,
+                    "free_tier_compute_gb_s": free_tier_compute_gb_s,
+                    "free_tier_cpu_s": free_tier_cpu_s,
                 },
                 "invocation_cost": {
                     "price": 0.4 / 1000000,
@@ -1035,12 +1054,23 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 "unit": "USD",
             }
         if region_code in tier2_regions:
+            cpu_price_s = tier2_pricing.get("cpu")
+            mem_price_gb_s = tier2_pricing.get("mem")
+            if cpu_price_s:
+                free_tier_cpu_s = 4.32 / cpu_price_s
+            else:
+                free_tier_cpu_s = 180000
+
+            if mem_price_gb_s:
+                free_tier_compute_gb_s = 0.9 / mem_price_gb_s
+            else:
+                free_tier_compute_gb_s = 360000
             return {
                 "compute_cost": {
-                    "cpu_s": tier2_pricing.get("cpu"),
-                    "memory_gb_s": tier2_pricing.get("mem"),
-                    "free_tier_compute_gb_s": 0.9 / tier2_pricing.get("mem"),
-                    "free_tier_cpu_s": 4.32 / tier2_pricing.get("cpu"),
+                    "cpu_s": cpu_price_s,
+                    "memory_gb_s": mem_price_gb_s,
+                    "free_tier_compute_gb_s": free_tier_compute_gb_s,
+                    "free_tier_cpu_s": free_tier_cpu_s,
                 },
                 "invocation_cost": {
                     "price": 0.4 / 1000000,

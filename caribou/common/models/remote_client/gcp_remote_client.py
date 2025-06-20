@@ -191,7 +191,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         tx = client.transaction()
 
         @firestore.transactional
-        def _transaction(tx: firestore.Transaction):
+        def _transaction(tx: firestore.Transaction) -> tuple[list[bool], dict[str, Any]]:
             snap = document.get(transaction=tx)
             data = snap.to_dict()
             if not data:
@@ -204,7 +204,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
             data[sync_node_name] = sync_map
             data[FIRESTORE_TTL_FIELD_NAME] = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
-            # print(str(data[FIRESTORE_TTL_FIELD_NAME]))
             tx.set(document, data)
             return list(sync_map.values()), data
 
@@ -280,7 +279,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         tx = client.transaction()
 
         @firestore.transactional
-        def _transaction(tx: firestore.Transaction):
+        def _transaction(tx: firestore.Transaction) -> None:
             tx.set(
                 document,
                 {
@@ -795,7 +794,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return topic_path
         return response.name
 
-    def create_pubsub_subscription(self, topic: str, subscription_name: str, push_endpoint: str | None = None) -> str:
+    def create_pubsub_subscription(self, topic: str, subscription_name: str, push_endpoint: str) -> str:
         client = self._pubsub_subscriber_client
 
         service_name = push_endpoint.split("https://", 1)[1]
@@ -870,7 +869,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client = self._firestore_client
         doc_ref = client.collection(table_name).document(key)
 
-        update_data = {}
+        update_data: dict[str, Any] = {}
         for column, type_, value in column_type_value:
             if type_ == "S":
                 update_data[column] = value
