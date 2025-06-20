@@ -10,13 +10,10 @@ class TestCarbonCollector(unittest.TestCase):
     def setUp(self):
         self.config = {"carbon_transmission_cost_calculator": "distance"}
 
-        environment_vars = {
-            "ELECTRICITY_MAPS_AUTH_TOKEN": "mock_token",
-            "CARIBOU_DEFAULT_PROVIDER": "aws"
-        }
-        with patch("os.environ.get") as mock_os_environ_get:
-            mock_os_environ_get.return_value = "mock_token"
-            self.carbon_collector = CarbonCollector()
+        environment_vars = {"ELECTRICITY_MAPS_AUTH_TOKEN": "mock_token", "CARIBOU_DEFAULT_PROVIDER": "aws"}
+        self.env_patcher = patch.dict("os.environ", environment_vars)
+        self.env_patcher.start()
+        self.carbon_collector = CarbonCollector()
 
     @patch.object(CarbonRetriever, "retrieve_available_regions")
     @patch.object(CarbonRetriever, "retrieve_carbon_region_data")

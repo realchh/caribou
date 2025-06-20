@@ -10,8 +10,6 @@ from caribou.common.utils import str_to_bool
 
 class Endpoints:  # pylint: disable=too-many-instance-attributes
     def __init__(self) -> None:
-        global_system_region = GLOBAL_GCP_SYSTEM_REGION
-
         integration_test_on = str_to_bool(os.environ.get("INTEGRATIONTEST_ON", "False"))
         self._provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
 
