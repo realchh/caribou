@@ -316,7 +316,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # 262,144 bytes (256 KB),
         # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/publish.html
         # For safety, we will set the limit to 256,000 bytes (250 KB)
-        # TODO: find GCP Pub/Sub max limit
         payload_size_byte = len(json_payload.encode("utf-8"))
         if payload_size_byte > MAX_TRANSFER_SIZE:
             log_message = (
@@ -810,7 +809,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                     raise RuntimeError("environment_variables must be a list of dicts with 'value' as a string")
                 if "AWS_REGION" in env_variable["key"]:  # AWS_REGION is a reserved environment variable
                     raise RuntimeError("environment_variables cannot contain AWS_REGION")
-                # TODO: get GCP
+                if "FUNCTION_REGION" in env_variable["key"]: # FUNCTION_REGION is a reserved environment variable in gcp
+                    raise RuntimeError("environment_variables cannot contain FUNCTION_REGION")
 
         def _register_handler(func: Callable[..., Any]) -> Callable[..., Any]:
             handler_name = name if name is not None else func.__name__
@@ -1029,7 +1029,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ) = self._get_current_node_desired_workflow_placement_decision(workflow_placement_decision)
 
         # Get the current region and provider
-        # TODO: support GCP
         current_region: str = ""
         current_provider: str = ""
 
@@ -1130,7 +1129,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ) = self._get_current_node_desired_workflow_placement_decision(workflow_placement_decision)
 
         # Get the current region and provider
-        # TODO: support GCP
         current_region: str = ""
         current_provider: str = ""
 
@@ -1231,7 +1229,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # Retrieve the argument and check if it is a dictionary.
         # (Currently only support dictionary arguments)
         argument_raw = args[0]
-
+        print(argument_raw)
         if not isinstance(argument_raw, dict):
             raise RuntimeError(
                 "Something went wrong, the input is not valid and was ",

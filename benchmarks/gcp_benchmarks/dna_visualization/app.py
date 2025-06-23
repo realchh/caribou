@@ -13,22 +13,23 @@ import base64
 # Change the following bucket name and region to match your setup
 gcp_bucket_name = "caribou-dna-visualization-naufal"
 
-workflow = CaribouWorkflow(name="dna_visualization", version="0.0.2")
+workflow = CaribouWorkflow(name="dna_visualization", version="0.0.3")
 
 
 @workflow.serverless_function(
     name="visualize",
     entry_point=True,
 )
-def visualize(event: dict) -> dict[str, Any]:
-    pubsub_message = base64.b64decode(event["data"]).decode("utf-8")
-    payload = json.loads(pubsub_message)
+def visualize(event: dict[str, Any]) -> dict[str, Any]:
+    print(event)
+    print(type(event))
+    if isinstance(event, str):
+        event = json.loads(event)
 
-    if "gen_file_name" in payload:
-        gen_file_name = payload["gen_file_name"]
+    if "gen_file_name" in event:
+        gen_file_name = event["gen_file_name"]
     else:
         raise ValueError("No gen_file_name provided")
-
     req_id = uuid.uuid4()
 
     local_gen_filename = f"/tmp/genbank-{req_id}.gb"
