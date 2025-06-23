@@ -21,3 +21,7 @@ functions-framework==3.*
 boto3==1.35.3
 google-cloud==0.34.0
 types-protobuf
+
+google-cloud-artifact-registry
+
+google-cloud-resource-manager

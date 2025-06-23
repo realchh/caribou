@@ -40,7 +40,10 @@ class Endpoints:  # pylint: disable=too-many-instance-attributes
         self._data_store_region = global_system_region
         self._data_store_client: RemoteClient | None = None
 
-        self._framework_cli_remote_client = RemoteClientFactory.get_framework_cli_remote_client(GLOBAL_SYSTEM_REGION)
+        if self._provider == Provider.AWS.value:
+            self._framework_cli_remote_client = RemoteClientFactory.get_framework_cli_remote_client(
+                GLOBAL_SYSTEM_REGION
+            )
 
     def get_deployment_resources_client(self) -> RemoteClient:
         if self._deployment_resources_client is None:

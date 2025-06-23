@@ -1233,7 +1233,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         argument_raw = args[0]
 
         if not isinstance(argument_raw, dict):
-            # TODO: Make this error message more informative
             raise RuntimeError(
                 "Something went wrong, the input is not valid and was ",
                 "not converted to a dictionary. Please refer to documentation "
@@ -1254,6 +1253,18 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             size_of_input_payload_gb = len(raw_sns_message.encode("utf-8")) / (1024**3) if entry_point else -1.0
 
             caribou_wrapper_argument = json.loads(raw_sns_message, cls=CustomDecoder)
+        elif ("@type" in argument_raw
+            and argument_raw["@type"] == "type.googleapis.com/google.pubsub.v1.PubsubMessage"
+            and "data" in argument_raw
+        ):
+            size_of_input_payload_gb = len(argument_raw["data"].encode("utf-8")) / (1024**3) if entry_point else -1.0
+            base64_data = argument_raw["data"]
+            decoded_data = base64.b64decode(base64_data).decode("utf-8")
+            decoded_data = json.loads(decoded_data)
+            if "payload" not in decoded_data:
+                caribou_wrapper_argument = {"payload": decoded_data}
+            else:
+                caribou_wrapper_argument = decoded_data
         else:
             # For non-SNS invocations, the argument is already a dictionary
             # the argument is simply the event (argument_raw).
@@ -1266,7 +1277,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         # Check if the argument is a dictionary (At this point it SHOULD be a dictionary)
         if not isinstance(caribou_wrapper_argument, dict):
-            # TODO: Make this error message more informative
             raise RuntimeError(
                 "Something went wrong, the argument is not a dictionary. ",
                 "Please check the format of the argument, refer to documentation "

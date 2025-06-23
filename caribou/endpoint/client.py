@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import botocore.exceptions
+import google.api_core.exceptions
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
@@ -22,6 +23,7 @@ from caribou.common.constants import (
 )
 from caribou.common.models.endpoints import Endpoints
 from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
+from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClient
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 
@@ -272,6 +274,14 @@ class Client:
         except RuntimeError as e:
             print(f"Could not remove ecr repository {identifier}: {str(e)}")
         except botocore.exceptions.ClientError as e:
+            print(f"Could not remove ecr repository {identifier}: {str(e)}")
+
+        try:
+            if isinstance(client, GCPRemoteClient):
+                client.remove_artifact_registry_repository(identifier)
+        except RuntimeError as e:
+            print(f"Could not remove artifact registry repository {identifier}: {str(e)}")
+        except google.api_core.exceptions.GoogleAPICallError as e:
             print(f"Could not remove ecr repository {identifier}: {str(e)}")
 
         # Remove the SNS messaging topic and all associated subscriptions

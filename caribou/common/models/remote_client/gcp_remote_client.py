@@ -493,6 +493,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         FROM {self._region}-docker.pkg.dev/serverless-runtimes/google-22/runtimes/python312
         WORKDIR /app        
         ENV PYTHONPATH /app
+        ENV CARIBOU_DEFAULT_PROVIDER gcp
         COPY requirements.txt ./
         {run_command}
         USER root
@@ -625,6 +626,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def remove_function(self, function_name: str) -> None:
         client = self._run_client
+        function_name = function_name.replace("_", "-")
         full_path = f"projects/{self._project_id}/locations/{self._region}/services/{function_name}"
         try:
             response = client.delete_service(name=full_path)
