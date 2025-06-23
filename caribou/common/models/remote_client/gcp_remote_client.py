@@ -102,7 +102,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         name = name.replace("_", "-")
 
         full_account_name = f"projects/{self._project_id}/serviceAccounts/{name}@{self._project_id}.iam.gserviceaccount.com"  # pylint: disable=line-too-long
-        print(full_account_name)
         try:
             service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
         except google_api_exceptions.NotFound:
@@ -323,7 +322,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_size: int,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
-        print("create function handler: ", handler, " additional_commands: ", additional_docker_commands)
         if len(function_name) > 50:
             function_name = function_name[:50]
 
@@ -343,7 +341,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
             with tempfile.TemporaryDirectory() as tmpdirname:
                 # Step 1: Unzip the ZIP file
-                print("step 1")
                 zip_path = os.path.join(tmpdirname, "code.zip")
                 with open(zip_path, "wb") as f_zip:
                     f_zip.write(zip_contents)
@@ -351,18 +348,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     zip_ref.extractall(tmpdirname)
 
                 # Step 2: Create a Dockerfile in the temporary directory
-                print("step 2")
                 dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 
                 # Step 3: Build the Docker Image
-                print("step 3")
                 image_name = f"{function_name.lower()}:latest"
                 self._build_docker_image(tmpdirname, image_name)
 
                 # Step 4: Upload the Image to Artifact Registry
-                print("step 4")
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
@@ -391,7 +385,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         timeout_s: int,
         service_account_email: str,
     ) -> str:
-        print("function create cloud run service")
         if len(service_name) > 50:
             service_name = service_name[:50]
 
@@ -418,22 +411,18 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             }
         )
 
-        # traffic_target = run_v2.TrafficTarget()
-        # traffic_target.percent = 100
-
         svc = run_v2.Service()
         svc.template = template
-        # svc.traffic = [traffic_target]
-        print("creating service with name: ", service_name)
+
         try:
             op = client.create_service(parent=parent, service=svc, service_id=service_name)
-            logger.info("Cloud Run service %s created successfully.", service_name)
+            print(f"Cloud Run service {service_name} created successfully.")
         except google_api_exceptions.AlreadyExists:
             existing = client.get_service(name=full_name)
             existing.template = template
             mask = field_mask_pb2.FieldMask(paths=["template"])  # pylint: disable=maybe-no-member
             op = client.update_service(service=existing, update_mask=mask)
-            logger.info("Cloud Run service %s updated successfully.", service_name)
+            print(f"Cloud Run service {service_name} updated successfully.")
 
         op.result()
         return client.get_service(name=full_name).uri
@@ -479,7 +468,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return image_uri
 
     def _generate_dockerfile(self, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
-        print("generate dockerfile handler: ", handler, " additional commands: ", additional_docker_commands)
         run_command = ""
         if additional_docker_commands and len(additional_docker_commands) > 0:
             run_command += " && ".join(additional_docker_commands)
@@ -578,7 +566,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_size: int,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
-        print("update function handler: ", handler, " additional commands: ", additional_docker_commands)
         if len(function_name) > 50:
             function_name = function_name[:50]
 
@@ -699,7 +686,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict | None = None) -> str:
         policy_list = json.loads(policy)
-        print(policy_list)
         if "roles" not in policy_list:
             raise ValueError("Policy must contain 'roles'")
 
@@ -794,6 +780,41 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             response = client.create_topic(name=topic_path)
         except google_api_exceptions.AlreadyExists:
             return topic_path
+
+        resource_manager_client = self._resource_manager_client
+        project_number = resource_manager_client.get_project(name=f"projects/{self._project_id}").name.split("/")[1]
+        publisher_service_email = f"{project_number}-compute@{self._project_id}.iam.gserviceaccount.com"
+        publisher_member = f"serviceAccount:{publisher_service_email}"
+        publisher_role = "roles/pubsub.publisher"
+
+        try:
+            policy = client.get_iam_policy(request={"resource": topic_path})
+
+            binding_to_modify = None
+            for binding in policy.bindings:
+                if binding.role == publisher_role:
+                    binding_to_modify = binding
+                    break
+
+            if binding_to_modify:
+                if publisher_member in binding_to_modify.members:
+                    return response.name # binding already exists
+                else:
+                    binding_to_modify.members.append(publisher_member)
+
+            else:
+                policy.bindings.append(
+                    policy_pb2.Binding( # pylint: disable=maybe-no-member
+                        role=publisher_role, members=[publisher_member]
+                    )
+                )
+
+            client.set_iam_policy(request={"resource": topic_path, "policy": policy})
+        except google_api_exceptions.NotFound as e:
+            print(f"Topic {topic_name} not found. Cannot set IAM policy: {e}")
+        except google_api_exceptions.GoogleAPICallError as e:
+            print(f"Failed to set IAM policy for topic {topic_path}: {e}")
+
         return response.name
 
     def create_pubsub_subscription(self, topic: str, subscription_name: str, push_endpoint: str) -> str:
@@ -805,7 +826,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         service_name = service_name[:30]
 
         run_service_email = f"{service_name}@{self._project_id}.iam.gserviceaccount.com"
-        print(run_service_email)
         push_config = PushConfig(
             push_endpoint=push_endpoint,
             oidc_token=PushConfig.OidcToken(service_account_email=run_service_email, audience=push_endpoint),
@@ -825,29 +845,25 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         service_name = service_name.split(".", 1)[0]
         service_name = "-".join(service_name.split("-")[:-2])
         full_name = client.service_path(self._project_id, self._region, service_name)
-        print(full_name)
         policy = client.get_iam_policy(request={"resource": full_name})
 
         run_service_email = f"{service_name[:30]}@{self._project_id}.iam.gserviceaccount.com"
         invoker_member = f"serviceAccount:{run_service_email}"
-        print(invoker_member)
 
         for binding in policy.bindings:
             if binding.role == "roles/run.invoker" and invoker_member in binding.members:
                 return
 
-        print(policy.bindings)
         new_binding = policy_pb2.Binding(  # pylint: disable=maybe-no-member
             role="roles/run.invoker", members=[invoker_member]
         )
         policy.bindings.append(new_binding)
-        print(policy.bindings)
         client.set_iam_policy(request={"resource": full_name, "policy": policy})
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
+        print("sending message: ", message, " to topic: ", identifier)
         client = self._pubsub_publisher_client
-        topic_path = client.topic_path(self._project_id, identifier)
-        client.publish(topic=topic_path, data=compress_json_str(message))
+        response = client.publish(topic=identifier, data=compress_json_str(message))
 
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._firestore_client
@@ -1049,6 +1065,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def remove_artifact_registry_repository(self, repository_name: str) -> None:
         repository_name = repository_name.lower()
+        repository_name = repository_name.replace("_", "-")
+
         full_repo_name = self._artifact_registry_client.repository_path(
             project=self._project_id, location=self._region, repository=repository_name
         )
@@ -1226,17 +1244,3 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     #         FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
     #     )
     #     print("unfinished")
-
-
-# if __name__ == "__main__":
-#     gcp_remote_client = GCPRemoteClient(project_id="caribou-460422", region="us-east1")
-#     # print(gcp_remote_client.get_service_account(name="809845967121-compute@developer.gserviceaccount.com"))
-#     resource_client = gcp_remote_client._resource_manager_client
-#     project_number = resource_client.get_project(name=f"projects/{gcp_remote_client._project_id}").name.split("/")[1]
-#     print(project_number)
-#
-#     gcp_remote_client.create_pubsub_subscription(
-#         "dna_visualization-0_1_0-visualize_gcp-us-east1_messaging_topic",
-#         "dna_visualization-0_1_0-visualize_gcp-us-east1_messaging_subscription",
-#         "https://dna-visualization-0-1-0-visualize-gcp-us-east1-es6wskpkmq-ue.a.run.app",
-#     )
