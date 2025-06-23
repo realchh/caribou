@@ -7,13 +7,12 @@ import matplotlib.pyplot as plt
 import uuid
 import os
 import google.cloud.storage as gcs
-import base64
 
 
 # Change the following bucket name and region to match your setup
-gcp_bucket_name = "caribou-dna-visualization-naufal"
+gcp_bucket_name = "caribou-dna-visualization"
 
-workflow = CaribouWorkflow(name="dna_visualization", version="0.0.3")
+workflow = CaribouWorkflow(name="dna_visualization", version="0.0.1")
 
 
 @workflow.serverless_function(
@@ -21,8 +20,6 @@ workflow = CaribouWorkflow(name="dna_visualization", version="0.0.3")
     entry_point=True,
 )
 def visualize(event: dict[str, Any]) -> dict[str, Any]:
-    print(event)
-    print(type(event))
     if isinstance(event, str):
         event = json.loads(event)
 
@@ -51,16 +48,6 @@ def visualize(event: dict[str, Any]) -> dict[str, Any]:
     # Close the figure to free up memory
     plt.close(ax.figure)
 
-    """
-    Required perms: storage.objects.create
-    storage.objects.delete
-        This permission is only required for uploads that overwrite an existing object.
-    storage.objects.get
-        This permission is only required if you plan on using the Google Cloud CLI to perform the tasks on this page.
-    storage.objects.list
-        This permission is only required if you plan on using the Google Cloud CLI to perform the tasks on this page.
-        This permission is also required if you want to use the Google Cloud console to verify the objects you've uploaded.
-    """
     destination_blob_name = f"result/{gen_file_name}.png"
     blob_to_upload = bucket.blob(destination_blob_name)
     blob_to_upload.upload_from_filename(local_result_filename)

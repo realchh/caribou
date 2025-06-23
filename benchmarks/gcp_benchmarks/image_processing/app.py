@@ -22,8 +22,8 @@ workflow = CaribouWorkflow(name="image_processing", version="0.0.1")
     entry_point=True,
 )
 def get_requests(event: dict[str, Any]) -> dict[str, Any]:
-    pubsub_message = base64.b64decode(event["data"]).decode("utf-8")
-    event = json.loads(pubsub_message)
+    if isinstance(event, str):
+        event = json.loads(event)
 
     if "image_name" in event:
         image_name: str = event["image_name"]
@@ -66,8 +66,8 @@ def get_requests(event: dict[str, Any]) -> dict[str, Any]:
     name="image_processor",
 )
 def image_processor(event: dict[str, Any]) -> dict[str, Any]:
-    pubsub_message = base64.b64decode(event["data"]).decode("utf-8")
-    event = json.loads(pubsub_message)
+    if isinstance(event, str):
+        event = json.loads(event)
 
     if "image_name" in event:
         image_name = event["image_name"]

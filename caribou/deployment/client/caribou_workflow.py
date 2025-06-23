@@ -27,7 +27,7 @@ from caribou.common.models.endpoints import Endpoints
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 from caribou.common.provider import Provider
-from caribou.common.utils import get_function_source
+from caribou.common.utils import get_function_source, decompress_json_str
 from caribou.deployment.client.caribou_function import CaribouFunction
 
 # Alter the logging to use CARIBOU level instead of info
@@ -1229,7 +1229,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # Retrieve the argument and check if it is a dictionary.
         # (Currently only support dictionary arguments)
         argument_raw = args[0]
-        print(argument_raw)
         if not isinstance(argument_raw, dict):
             raise RuntimeError(
                 "Something went wrong, the input is not valid and was ",
@@ -1257,7 +1256,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ):
             size_of_input_payload_gb = len(argument_raw["data"].encode("utf-8")) / (1024**3) if entry_point else -1.0
             base64_data = argument_raw["data"]
-            decoded_data = base64.b64decode(base64_data).decode("utf-8")
+            print("base64 data:", base64_data)
+            decoded_data = base64.b64decode(base64_data)
+            print("decoded from base64 data:", decoded_data)
+            decoded_data = decompress_json_str(decoded_data)
+            print("decoded json data: ", decoded_data)
             decoded_data = json.loads(decoded_data)
             if "payload" not in decoded_data:
                 caribou_wrapper_argument = {"payload": decoded_data}

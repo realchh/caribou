@@ -861,9 +861,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client.set_iam_policy(request={"resource": full_name, "policy": policy})
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
-        print("sending message: ", message, " to topic: ", identifier)
         client = self._pubsub_publisher_client
-        response = client.publish(topic=identifier, data=compress_json_str(message))
+        client.publish(topic=identifier, data=compress_json_str(message))
 
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._firestore_client
