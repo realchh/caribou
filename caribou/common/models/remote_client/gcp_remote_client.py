@@ -87,7 +87,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
         self._logging_client = logging_v2.Client(credentials=self._credentials)
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
-        # Allow for override of the deployment resources bucket (Due to S3 bucket name restrictions)
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
         )
@@ -96,19 +95,18 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return f"gcp_{self._region}"
 
     def get_service_account(self, name: str) -> str:
-        if len(name) >= 30:
-            name = name[:30]
-
-        name = name.replace("_", "-")
-
-        full_account_name = f"projects/{self._project_id}/serviceAccounts/{name}@{self._project_id}.iam.gserviceaccount.com"  # pylint: disable=line-too-long
+        sa_email = f"{name}@{self._project_id}.iam.gserviceaccount.com"
+        full_account_name = f"projects/{self._project_id}/serviceAccounts/{sa_email}"
         try:
-            service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
-        except google_api_exceptions.NotFound:
             service_account_object = self._iam_admin_client.create_service_account(
                 name=f"projects/{self._project_id}",
                 account_id=name,
             )
+        except google_api_exceptions.AlreadyExists:
+            service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Failed to create service account: {e}") from e
+
         return service_account_object.email
 
     def get_cloud_run_service(self, service_name: str) -> dict[str, Any] | None:
@@ -322,13 +320,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_size: int,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
-        if len(function_name) > 50:
-            function_name = function_name[:50]
-
-        function_name = function_name.replace("_", "-")
-
-        function_name = function_name.strip("-")
-
         image_uri: str
         deployed_image_uri = self._get_deployed_image_uri(function_name)
         if deployed_image_uri:
@@ -360,9 +351,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
-        service_account_email = self.get_service_account(role_identifier)
+        print("role identifier: ", role_identifier)
 
-        print("creating cloud run service url")
+        print("creating cloud run service url for service: ", function_name)
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
@@ -370,7 +361,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             cpu=1.0,
             memory_mib=memory_size,
             timeout_s=timeout,
-            service_account_email=service_account_email,
+            service_account_email=role_identifier,
         )
 
         return service_url
@@ -385,12 +376,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         timeout_s: int,
         service_account_email: str,
     ) -> str:
-        if len(service_name) > 50:
-            service_name = service_name[:50]
-
-        service_name = service_name.replace("_", "-")
-
-        service_name = service_name.strip("-")
+        print(service_name)
 
         client = self._run_client
         parent = f"projects/{self._project_id}/locations/{self._region}"
@@ -566,12 +552,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_size: int,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
-        if len(function_name) > 50:
-            function_name = function_name[:50]
-
-        function_name = function_name.replace("_", "-")
-
-        function_name = function_name.strip("-")
         deployed_image_uri = self._get_deployed_image_uri(function_name)
         if deployed_image_uri:
             image_uri = deployed_image_uri
@@ -597,8 +577,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
-        service_account_email = self.get_service_account(role_identifier)
-
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
@@ -606,7 +584,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             cpu=1.0,
             memory_mib=memory_size,
             timeout_s=timeout,
-            service_account_email=service_account_email,
+            service_account_email=role_identifier,
         )
 
         return service_url
@@ -631,23 +609,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client = self._iam_admin_client
         project_client = self._resource_manager_client
 
-        if len(role_name) >= 30:
-            role_name = role_name[:30]
-
-        role_name = role_name.replace("_", "-")
-
         service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
         service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
 
-        try:
-            client.get_service_account(name=service_account_name)
-        except google_api_exceptions.NotFound:
-            client.create_service_account(
-                name=f"projects/{self._project_id}",
-                account_id=role_name,
-                service_account=iam_admin_v1.ServiceAccount({"display_name": role_name}),
-            )
-            time.sleep(3)
+        sa = self.get_service_account(name=role_name)
 
         project_policy = project_client.get_iam_policy(resource=f"projects/{self._project_id}")
 
@@ -682,9 +647,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         )
 
         client.set_iam_policy(request={"resource": service_account_name, "policy": service_account_policy})
-        return self.get_service_account(service_account_email)
+        return sa
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict | None = None) -> str:
+        print("role name: ", role_name)
         policy_list = json.loads(policy)
         if "roles" not in policy_list:
             raise ValueError("Policy must contain 'roles'")
@@ -694,18 +660,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client = self._iam_admin_client
         project_client = self._resource_manager_client
 
-        if len(role_name) >= 30:
-            role_name = role_name[:30]
-
-        role_name = role_name.replace("_", "-")
-
         service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
         service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
 
-        try:
-            client.get_service_account(name=service_account_name)
-        except google_api_exceptions.NotFound:
-            return self.create_role(role_name, policy, trust_policy)
+        sa = self.get_service_account(name=role_name)
 
         project_policy = project_client.get_iam_policy(resource=f"projects/{self._project_id}")
 
@@ -729,15 +687,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 project_policy.bindings.remove(bind)
 
         project_client.set_iam_policy(request={"resource": f"projects/{self._project_id}", "policy": project_policy})
-        return self.get_service_account(service_account_email)
+        return sa
 
     def remove_role(self, role_name: str) -> None:
         client = self._resource_manager_client
 
-        if len(role_name) >= 30:
-            role_name = role_name[:30]
-
-        role_name = role_name.replace("_", "-")
         service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
         policy_member = f"serviceAccount:{service_account_email}"
         service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
@@ -783,7 +737,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         resource_manager_client = self._resource_manager_client
         project_number = resource_manager_client.get_project(name=f"projects/{self._project_id}").name.split("/")[1]
-        publisher_service_email = f"{project_number}-compute@{self._project_id}.iam.gserviceaccount.com"
+        publisher_service_email = f"{project_number}-compute@developer.gserviceaccount.com"
         publisher_member = f"serviceAccount:{publisher_service_email}"
         publisher_role = "roles/pubsub.publisher"
 
@@ -817,18 +771,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return response.name
 
-    def create_pubsub_subscription(self, topic: str, subscription_name: str, push_endpoint: str) -> str:
+    def create_pubsub_subscription(
+            self, topic: str, subscription_name: str, push_endpoint: str, service_account_name: str
+    ) -> str:
         client = self._pubsub_subscriber_client
 
-        service_name = push_endpoint.split("https://", 1)[1]
-        service_name = service_name.split(".", 1)[0]
-        service_name = "-".join(service_name.split("-")[:-2])
-        service_name = service_name[:30]
-
-        run_service_email = f"{service_name}@{self._project_id}.iam.gserviceaccount.com"
         push_config = PushConfig(
             push_endpoint=push_endpoint,
-            oidc_token=PushConfig.OidcToken(service_account_email=run_service_email, audience=push_endpoint),
+            oidc_token=PushConfig.OidcToken(service_account_email=service_account_name, audience=push_endpoint),
         )
 
         subscription_path = client.subscription_path(project=self._project_id, subscription=subscription_name)
@@ -839,16 +789,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return subscription_path
         return response.name
 
-    def add_pubsub_permission_for_cloud_run(self, service_name: str) -> None:
+    def add_pubsub_permission_for_cloud_run(self, service_name: str, service_account_name: str) -> None:
         client = self._run_client
-        service_name = service_name.split("https://", 1)[1]
-        service_name = service_name.split(".", 1)[0]
-        service_name = "-".join(service_name.split("-")[:-2])
+
         full_name = client.service_path(self._project_id, self._region, service_name)
         policy = client.get_iam_policy(request={"resource": full_name})
 
-        run_service_email = f"{service_name[:30]}@{self._project_id}.iam.gserviceaccount.com"
-        invoker_member = f"serviceAccount:{run_service_email}"
+        invoker_member = f"serviceAccount:{service_account_name}"
 
         for binding in policy.bindings:
             if binding.role == "roles/run.invoker" and invoker_member in binding.members:
@@ -1243,3 +1190,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     #         FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
     #     )
     #     print("unfinished")
+
+# if __name__ == "__main__":
+#     gcp_remote_client = GCPRemoteClient()
+#
+#     (print(gcp_remote_client._get_region_abbreviation("east1")))

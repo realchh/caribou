@@ -25,6 +25,10 @@ class DeployInstructions(ABC):
         remote_state: RemoteState,
         function_exists: bool,
     ) -> list[Instruction]:
+        print("deployment instruction name:", name)
+        print("deployment instruction region:", self._region)
+        print("deployment instruction provider:", self._provider.value)
+        print("deployment role name:", role.name)
         self._config = self._get_config(providers, self._provider.value)
         instructions: list[Instruction] = []
         messaging_topic_identifier_varname = f"{name}_messaging_topic"
@@ -116,7 +120,7 @@ class DeployInstructions(ABC):
         instructions.extend(
             [
                 self._get_subscribe_messaging_topic_instruction(
-                    messaging_topic_identifier_varname, function_varname, subscription_varname
+                    messaging_topic_identifier_varname, function_varname, subscription_varname, iam_role_varname
                 ),
                 RecordResourceVariable(
                     resource_type="messaging_topic_subscription",
@@ -125,7 +129,7 @@ class DeployInstructions(ABC):
                     variable_name=subscription_varname,
                 ),
                 self._add_function_permission_for_messaging_topic_instruction(
-                    messaging_topic_identifier_varname, function_varname
+                    messaging_topic_identifier_varname, function_varname, iam_role_varname
                 ),
             ]
         )
@@ -146,7 +150,11 @@ class DeployInstructions(ABC):
 
     @abstractmethod
     def _get_subscribe_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str, subscription_varname: str
+            self,
+            messaging_topic_identifier_varname: str,
+            function_varname: str,
+            subscription_varname: str,
+            iam_role_varname: str
     ) -> Instruction:
         raise NotImplementedError
 
@@ -177,7 +185,7 @@ class DeployInstructions(ABC):
 
     @abstractmethod
     def _add_function_permission_for_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str
+        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str
     ) -> Instruction:
         raise NotImplementedError
 

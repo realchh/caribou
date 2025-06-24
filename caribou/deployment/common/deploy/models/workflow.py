@@ -310,18 +310,26 @@ class Workflow(Resource):
             # (Isolate the actual function name from the full function name)
             # NOTE: This may need to be changed if there are major changes to the
             # naming convention of the function name in _get_function_name() method
-            # of wokflow_builder.py
-            pattern = r"^[^-]+-[^-]+-(.*)_[^-]+-"
+            # of workflow_builder.py
+            pattern_aws = r"^[^-]+-[^-]+-(.*)_[^-]+-"
+            pattern_gcp = r"^[^-]+-[^-]+-[\d]+-[\d]+-[\d]+-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+"
 
             # Search for the pattern in the input string
-            match = re.search(pattern, function_name)
-            if match:
-                function_name = match.group(1)
+            match_aws = re.search(pattern_aws, function_name)
+            match_gcp = re.search(pattern_gcp, function_name)
+            if match_aws:
+                function_name = match_aws.group(1)
+
+                if len(function_name) > 20 or len(function_name) == 0:
+                    raise RuntimeError("Function name must be greater than 0 and less than or equal to 20 characters")
+
+                if not function_name.replace("_", "").isalnum():
+                    raise RuntimeError("Function name must contain only letters, numbers, or underscores")
+
+            elif match_gcp:
+                function_name = match_gcp.group(0)
+
+                if not function_name.replace("-", "").isalnum():
+                    raise RuntimeError("Function name must contain only letters, numbers, or underscores")
             else:
                 raise RuntimeError("Unexpected Error in function name:", function_name)
-
-            if len(function_name) > 20 or len(function_name) == 0:
-                raise RuntimeError("Function name must be greater than 0 and less than or equal to 20 characters")
-
-            if not function_name.replace("_", "").isalnum():
-                raise RuntimeError("Function name must contain only letters, numbers, or underscores")

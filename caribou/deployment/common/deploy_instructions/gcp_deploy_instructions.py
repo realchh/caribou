@@ -8,7 +8,6 @@ from caribou.deployment.common.deploy_instructions.deploy_instructions import De
 
 class GCPDeployInstructions(DeployInstructions):
     def _get_create_iam_role_instruction(self, role: IAMRole, iam_role_varname: str) -> Instruction:
-        # In GCP we normally create a service account and attach roles
         return APICall(
             name="create_role",
             params={
@@ -90,7 +89,7 @@ class GCPDeployInstructions(DeployInstructions):
         )
 
     def _get_subscribe_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str, subscription_varname: str
+        self, messaging_topic_identifier_varname: str, function_varname: str, subscription_varname: str, iam_role_varname: str
     ) -> Instruction:
         return APICall(
             name="create_pubsub_subscription",
@@ -98,16 +97,18 @@ class GCPDeployInstructions(DeployInstructions):
                 "topic": Variable(messaging_topic_identifier_varname),
                 "subscription_name": subscription_varname,
                 "push_endpoint": Variable(function_varname),
+                "service_account_name": Variable(iam_role_varname),
             },
             output_var=subscription_varname,
         )
 
     def _add_function_permission_for_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str
+        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str
     ) -> Instruction:
         return APICall(
             name="add_pubsub_permission_for_cloud_run",
             params={
                 "service_name": Variable(function_varname),
+                "service_account_name": Variable(iam_role_varname),
             },
         )
