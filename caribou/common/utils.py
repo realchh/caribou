@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import importlib
 import inspect
 import textwrap
@@ -84,3 +85,111 @@ def decompress_json_str(compressed_bytes: bytes) -> str:
     json_str = json_bytes.decode("utf-8")
 
     return json_str
+
+def generate_workflow_service_account_id(workflow_name: str, workflow_ver: str) -> str:
+    # GCP service account has a max length of 30 characters. We use a hash to shorten the name. The SA format will
+    # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow id>-<hash truncated to 9 chars>
+    workflow_name = workflow_name.lower().replace("_", "-").replace(".", "-")
+    workflow_ver = workflow_ver.lower().replace("_", "-").replace(".", "-")
+
+    workflow_full_name = f"{workflow_name}-{workflow_ver}"
+    workflow_hash = hashlib.md5(workflow_full_name.encode("utf-8")).hexdigest()
+
+    if len(workflow_name) < 4:
+        workflow_name_prefix = workflow_name.strip("-")
+        workflow_name_suffix = workflow_name.strip("-")
+    else:
+        workflow_name_prefix = workflow_name[:4].strip("-")
+        workflow_name_suffix = workflow_name[-4:].strip("-")
+
+    return f"{workflow_name_prefix}-{workflow_name_suffix}-{workflow_ver}-{workflow_hash[:14-len(workflow_ver)]}"
+
+
+def get_country_abbreviation(country: str) -> str:
+    if country == "us":
+        pass
+    elif country == "africa":
+        country = "af"
+    elif country == "asia":
+        country = "as"
+    elif country == "europe":
+        country = "eu"
+    elif country == "australia":
+        country = "au"
+    elif country == "me":
+        pass
+    elif country == "northamerica":
+        country = "na"
+    elif country == "southamerica":
+        country = "sa"
+
+    return country
+
+
+def get_region_abbreviation(region: str) -> str:
+    if region.startswith("northeast"):
+        region = "ne" + region[9:]
+    elif region.startswith("southeast"):
+        region = "se" + region[9:]
+    elif region.startswith("southwest"):
+        region = "sw" + region[9:]
+    elif region.startswith("northwest"):
+        region = "nw" + region[9:]
+    elif region.startswith("north"):
+        region = "no" + region[5:]
+    elif region.startswith("east"):
+        region = "ea" + region[4:]
+    elif region.startswith("south"):
+        region = "so" + region[5:]
+    elif region.startswith("west"):
+        region = "we" + region[4:]
+    elif region.startswith("central"):
+        region = "ce" + region[7:]
+
+    return region
+
+
+def generate_workflow_gcp_function_name(
+        workflow_name: str, workflow_ver: str, function_name: str, region: dict[str, str]
+) -> str:
+    # GCP cloud run name has a max length of 49 characters. We use a hash to shorten the name. The name format will
+    # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow version>-
+    # <first 4 chars of function name>-<last 4 chars of function name>-<hash truncated to 9 chars>
+    print("original function name:", function_name)
+    workflow_name = workflow_name.lower().replace("_", "-").replace(".", "-")
+    workflow_ver = workflow_ver.lower().replace("_", "-").replace(".", "-")
+    function_name = function_name.lower().replace("_", "-").replace(".", "-")
+
+    provider = region["provider"]
+    country = region["region"].split("-")[0]
+    region = region["region"].split("-")[1]
+
+    country = get_country_abbreviation(country)
+    region = get_region_abbreviation(region)
+
+    workflow_full_name = f"{workflow_name}-{workflow_ver}-{function_name}"
+    workflow_hash = hashlib.md5(workflow_full_name.encode("utf-8")).hexdigest()
+
+    if len(workflow_name) < 4:
+        workflow_name_prefix = workflow_name.strip("-")
+        workflow_name_suffix = workflow_name.strip("-")
+    else:
+        workflow_name_prefix = workflow_name[:4].strip("-")
+        workflow_name_suffix = workflow_name[-4:].strip("-")
+
+    if len(function_name) < 4:
+        function_name_prefix = function_name.strip("-")
+        function_name_suffix = function_name.strip("-")
+    else:
+        function_name_prefix = function_name[:4].strip("-")
+        function_name_suffix = function_name[-4:].strip("-")
+
+    return (
+        f"{workflow_name_prefix}-"
+        f"{workflow_name_suffix}-"
+        f"{workflow_ver}-"
+        f"{function_name_prefix}-"
+        f"{function_name_suffix}-"
+        f"{provider}-{country}-{region}-"
+        f"{workflow_hash[:22-len(workflow_ver)-len(country)-len(region)]}"
+    )

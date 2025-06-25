@@ -323,13 +323,11 @@ class Workflow(Resource):
                 if len(function_name) > 20 or len(function_name) == 0:
                     raise RuntimeError("Function name must be greater than 0 and less than or equal to 20 characters")
 
-                if not function_name.replace("_", "").isalnum():
-                    raise RuntimeError("Function name must contain only letters, numbers, or underscores")
-
             elif match_gcp:
                 function_name = match_gcp.group(0)
 
-                if not function_name.replace("-", "").isalnum():
-                    raise RuntimeError("Function name must contain only letters, numbers, or underscores")
             else:
                 raise RuntimeError("Unexpected Error in function name:", function_name)
+
+            if not function_name.replace("-", "").isalnum():
+                raise RuntimeError("Function name must contain only letters, numbers, or underscores")

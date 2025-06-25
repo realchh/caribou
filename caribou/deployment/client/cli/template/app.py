@@ -1,7 +1,8 @@
 from typing import Any
 
-from caribou.deployment.client import CaribouWorkflow
 from src.fifth import fifth
+
+from caribou.deployment.client import CaribouWorkflow
 
 workflow = CaribouWorkflow(name="{{ workflow_name }}", version="0.0.1")
 

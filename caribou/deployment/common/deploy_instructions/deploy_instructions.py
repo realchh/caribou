@@ -150,11 +150,11 @@ class DeployInstructions(ABC):
 
     @abstractmethod
     def _get_subscribe_messaging_topic_instruction(
-            self,
-            messaging_topic_identifier_varname: str,
-            function_varname: str,
-            subscription_varname: str,
-            iam_role_varname: str
+        self,
+        messaging_topic_identifier_varname: str,
+        function_varname: str,
+        subscription_varname: str,
+        iam_role_varname: str,
     ) -> Instruction:
         raise NotImplementedError
 

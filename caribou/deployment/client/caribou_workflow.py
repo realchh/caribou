@@ -27,7 +27,7 @@ from caribou.common.models.endpoints import Endpoints
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 from caribou.common.provider import Provider
-from caribou.common.utils import get_function_source, decompress_json_str
+from caribou.common.utils import decompress_json_str, get_function_source
 from caribou.deployment.client.caribou_function import CaribouFunction
 
 # Alter the logging to use CARIBOU level instead of info
@@ -809,7 +809,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                     raise RuntimeError("environment_variables must be a list of dicts with 'value' as a string")
                 if "AWS_REGION" in env_variable["key"]:  # AWS_REGION is a reserved environment variable
                     raise RuntimeError("environment_variables cannot contain AWS_REGION")
-                if "FUNCTION_REGION" in env_variable["key"]: # FUNCTION_REGION is a reserved environment variable in gcp
+                if (
+                    "FUNCTION_REGION" in env_variable["key"]
+                ):  # FUNCTION_REGION is a reserved environment variable in gcp
                     raise RuntimeError("environment_variables cannot contain FUNCTION_REGION")
 
         def _register_handler(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -1250,7 +1252,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             size_of_input_payload_gb = len(raw_sns_message.encode("utf-8")) / (1024**3) if entry_point else -1.0
 
             caribou_wrapper_argument = json.loads(raw_sns_message, cls=CustomDecoder)
-        elif ("@type" in argument_raw
+        elif (
+            "@type" in argument_raw
             and argument_raw["@type"] == "type.googleapis.com/google.pubsub.v1.PubsubMessage"
             and "data" in argument_raw
         ):

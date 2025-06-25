@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 import queue
@@ -6,6 +5,7 @@ from collections import defaultdict
 from typing import Any, Optional
 
 from caribou.common.provider import Provider as ProviderEnum
+from caribou.common.utils import generate_workflow_service_account_id, generate_workflow_gcp_function_name
 from caribou.deployment.client.caribou_workflow import CaribouFunction
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.config.config_schema import Provider
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowBuilder:
+    # pylint: disable=too-many-statements
     def build_workflow(  # pylint: disable=too-many-branches
         self, config: Config, regions: list[dict[str, str]]
     ) -> Workflow:
@@ -36,7 +37,7 @@ class WorkflowBuilder:
         function_name_to_function: dict[str, CaribouFunction] = {}
         entry_point: Optional[CaribouFunction] = None
 
-        gcp_workflow_service_account = self._generate_workflow_service_account_id(
+        gcp_workflow_service_account = generate_workflow_service_account_id(
             config.workflow_name, config.workflow_version
         )
 
@@ -229,14 +230,12 @@ class WorkflowBuilder:
         # This is used to uniquely identify a function with respect to a workflow,
         # its version, the provider and the region
         # Note: If this is altered, also alter verify_name_and_version() in workflow.py
-        if region['provider'] == ProviderEnum.GCP.value:
-            name = self._generate_workflow_gcp_function_name(
+        if region["provider"] == ProviderEnum.GCP.value:
+            name = generate_workflow_gcp_function_name(
                 config.workflow_name, config.workflow_version, function.name, region
             )
         else:
-            name = (
-                f"{config.workflow_name}-{config.workflow_version}-{function.name}_{region['provider']}-{region['region']}" # pylint: disable=line-too-long
-            )
+            name = f"{config.workflow_name}-{config.workflow_version}-{function.name}_{region['provider']}-{region['region']}"  # pylint: disable=line-too-long
         return name.replace(".", "_")
 
     def _get_function_name_without_provider_and_region(self, function_name: str) -> str:
@@ -335,111 +334,6 @@ class WorkflowBuilder:
     def _verify_providers(self, providers: dict[str, Any]) -> None:
         for provider in providers.values():
             Provider(**provider)
-
-    def _generate_workflow_service_account_id(self, workflow_name: str, workflow_ver: str) -> str:
-        # GCP service account has a max length of 30 characters. We use a hash to shorten the name. The SA format will
-        # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow id>-<hash truncated to 9 chars>
-        workflow_name = workflow_name.lower().replace("_", "-").replace(".","-")
-        workflow_ver = workflow_ver.lower().replace("_", "-").replace(".","-")
-
-        workflow_full_name = f"{workflow_name}-{workflow_ver}"
-        workflow_hash = hashlib.md5(workflow_full_name.encode("utf-8")).hexdigest()
-
-        if len(workflow_name) < 4:
-            workflow_name_prefix = workflow_name.strip("-")
-            workflow_name_suffix = workflow_name.strip("-")
-        else:
-            workflow_name_prefix = workflow_name[:4].strip("-")
-            workflow_name_suffix = workflow_name[-4:].strip("-")
-
-        return f"{workflow_name_prefix}-{workflow_name_suffix}-{workflow_ver}-{workflow_hash[:14-len(workflow_ver)]}"
-
-    def _generate_workflow_gcp_function_name(
-            self, workflow_name: str, workflow_ver: str, function_name: str, region: dict[str, str]
-    ) -> str:
-        # GCP cloud run name has a max length of 49 characters. We use a hash to shorten the name. The name format will
-        # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow version>-
-        # <first 4 chars of function name>-<last 4 chars of function name>-<hash truncated to 9 chars>
-        print("original function name:", function_name)
-        workflow_name = workflow_name.lower().replace("_", "-").replace(".","-")
-        workflow_ver = workflow_ver.lower().replace("_", "-").replace(".","-")
-        function_name = function_name.lower().replace("_", "-").replace(".","-")
-
-        provider = region["provider"]
-        country = region["region"].split("-")[0]
-        region = region["region"].split("-")[1]
-
-        country = self._get_country_abbreviation(country)
-        region = self._get_region_abbreviation(region)
-
-        workflow_full_name = f"{workflow_name}-{workflow_ver}-{function_name}"
-        workflow_hash = hashlib.md5(workflow_full_name.encode("utf-8")).hexdigest()
-
-        if len(workflow_name) < 4:
-            workflow_name_prefix = workflow_name.strip("-")
-            workflow_name_suffix = workflow_name.strip("-")
-        else:
-            workflow_name_prefix = workflow_name[:4].strip("-")
-            workflow_name_suffix = workflow_name[-4:].strip("-")
-
-        if len(function_name) < 4:
-            function_name_prefix = function_name.strip("-")
-            function_name_suffix = function_name.strip("-")
-        else:
-            function_name_prefix = function_name[:4].strip("-")
-            function_name_suffix = function_name[-4:].strip("-")
-
-        return (
-            f"{workflow_name_prefix}-"
-            f"{workflow_name_suffix}-"
-            f"{workflow_ver}-"
-            f"{function_name_prefix}-"
-            f"{function_name_suffix}-"
-            f"{provider}-{country}-{region}-"
-            f"{workflow_hash[:22-len(workflow_ver)-len(country)-len(region)]}"
-        )
-
-    def _get_region_abbreviation(self, region: str) -> str:
-        if region.startswith("northeast"):
-            region = "ne" + region[9:]
-        elif region.startswith("southeast"):
-            region = "se" + region[9:]
-        elif region.startswith("southwest"):
-            region = "sw" + region[9:]
-        elif region.startswith("northwest"):
-            region = "nw" + region[9:]
-        elif region.startswith("north"):
-            region = "no" + region[5:]
-        elif region.startswith("east"):
-            region = "ea" + region[4:]
-        elif region.startswith("south"):
-            region = "so" + region[5:]
-        elif region.startswith("west"):
-            region = "we" + region[4:]
-        elif region.startswith("central"):
-            region = "ce" + region[7:]
-
-        return region
-
-    def _get_country_abbreviation(self, country: str) -> str:
-        if country == "us":
-            pass
-        elif country == "africa":
-            country = "af"
-        elif country == "asia":
-            country = "as"
-        elif country == "europe":
-            country = "eu"
-        elif country == "australia":
-            country = "au"
-        elif country == "me":
-            pass
-        elif country == "northamerica":
-            country = "na"
-        elif country == "southamerica":
-            country = "sa"
-
-        return country
 
     def get_function_role(self, config: Config, function_name: str) -> IAMRole:
         if config.project_dir is None:

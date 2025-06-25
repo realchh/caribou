@@ -16,7 +16,6 @@ from google.cloud import (  # scheduler_v1,
     eventarc_v1,
     firestore,
     firestore_admin_v1,
-    iam_admin_v1,
     logging_v2,
     pubsub_v1,
     resourcemanager_v3,
@@ -175,7 +174,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         raise RuntimeError(f"Unknown resource type {resource.resource_type}")
 
     def service_account_exists(self, resource: Resource) -> bool:
-        return self.get_service_account(resource.name) is not None
+        try:
+            client = self._iam_admin_client
+            print("getting service account:", resource.name)
+            response = client.get_service_account(name=resource.name)
+            return response is not None
+        except google_api_exceptions.NotFound:
+            return False
+        except google_api_exceptions.GoogleAPICallError:
+            return False
 
     def cloud_run_service_exists(self, resource: Resource) -> bool:
         return self.get_cloud_run_service(resource.name) is not None
@@ -414,10 +421,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return client.get_service(name=full_name).uri
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
+        print(f"function name: {function_name}")
+        print(f"image name: {image_name}")
         workflow_instance_id = "-".join(function_name.split("-")[0:2])
-
+        print(f"workflow instance id: {workflow_instance_id}")
         function_name_simple = function_name[len(workflow_instance_id) + 1 :].rsplit("_", 1)[0]
-
+        print(f"function name simple: {function_name_simple}")
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 
@@ -657,11 +666,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         roles = policy_list["roles"]
 
-        client = self._iam_admin_client
         project_client = self._resource_manager_client
 
         service_account_email = f"{role_name}@{self._project_id}.iam.gserviceaccount.com"
-        service_account_name = f"projects/{self._project_id}/serviceAccounts/{service_account_email}"
 
         sa = self.get_service_account(name=role_name)
 
@@ -752,13 +759,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
             if binding_to_modify:
                 if publisher_member in binding_to_modify.members:
-                    return response.name # binding already exists
-                else:
-                    binding_to_modify.members.append(publisher_member)
+                    return response.name  # binding already exists
+
+                binding_to_modify.members.append(publisher_member)
 
             else:
                 policy.bindings.append(
-                    policy_pb2.Binding( # pylint: disable=maybe-no-member
+                    policy_pb2.Binding(  # pylint: disable=maybe-no-member
                         role=publisher_role, members=[publisher_member]
                     )
                 )
@@ -772,7 +779,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return response.name
 
     def create_pubsub_subscription(
-            self, topic: str, subscription_name: str, push_endpoint: str, service_account_name: str
+        self, topic: str, subscription_name: str, push_endpoint: str, service_account_name: str
     ) -> str:
         client = self._pubsub_subscriber_client
 
@@ -789,9 +796,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return subscription_path
         return response.name
 
-    def add_pubsub_permission_for_cloud_run(
-            self, cloud_run_service_name:str, service_account_name: str
-    ) -> None:
+    def add_pubsub_permission_for_cloud_run(self, cloud_run_service_name: str, service_account_name: str) -> None:
         client = self._run_client
 
         full_name = client.service_path(self._project_id, self._region, cloud_run_service_name)
@@ -811,7 +816,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
         client = self._pubsub_publisher_client
-        client.publish(topic=identifier, data=compress_json_str(message))
+        response = client.publish(topic=identifier, data=compress_json_str(message))
+        print(response.result())
 
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._firestore_client
@@ -1011,23 +1017,27 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.NotFound as e:
             raise RuntimeError(f"Topic {topic_name} not found") from e
 
-    def remove_artifact_registry_repository(self, repository_name: str) -> None:
-        repository_name = repository_name.lower()
-        repository_name = repository_name.replace("_", "-")
+    def remove_artifact_registry_repository(self, package_name: str) -> None:
+        repo_id = "caribou"
 
-        full_repo_name = self._artifact_registry_client.repository_path(
-            project=self._project_id, location=self._region, repository=repository_name
+        package_name = package_name.lower()
+        package_name = package_name.replace("_", "-")
+
+        full_package_name = self._artifact_registry_client.package_path(
+            project=self._project_id, location=self._region, repository=repo_id, package=package_name
         )
-        self._artifact_registry_client.delete_repository(name=full_repo_name)
+        print(f"Removing package {full_package_name}")
+        self._artifact_registry_client.delete_package(name=full_package_name)
 
     def artifact_registry_repository_exists(self, resource: Resource) -> bool:
-        repository_name = resource.name.lower()
-        full_repo_name = self._artifact_registry_client.repository_path(
-            project=self._project_id, location=self._region, repository=repository_name
+        repo_id = "caribou"
+        package_name = resource.name.lower()
+        full_package_name = self._artifact_registry_client.package_path(
+            project=self._project_id, location=self._region, repository=repo_id, package=package_name
         )
 
         try:
-            self._artifact_registry_client.get_repository(name=full_repo_name)
+            self._artifact_registry_client.get_package(name=full_package_name)
             return True
         except google_api_exceptions.NotFound:
             return False
@@ -1192,6 +1202,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     #         FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
     #     )
     #     print("unfinished")
+
 
 # if __name__ == "__main__":
 #     gcp_remote_client = GCPRemoteClient()
