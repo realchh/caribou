@@ -129,7 +129,7 @@ class DeployInstructions(ABC):
                     variable_name=subscription_varname,
                 ),
                 self._add_function_permission_for_messaging_topic_instruction(
-                    messaging_topic_identifier_varname, function_varname, iam_role_varname
+                    messaging_topic_identifier_varname, function_varname, iam_role_varname, name
                 ),
             ]
         )
@@ -185,7 +185,7 @@ class DeployInstructions(ABC):
 
     @abstractmethod
     def _add_function_permission_for_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str
+        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str, cloud_run_name: str
     ) -> Instruction:
         raise NotImplementedError
 

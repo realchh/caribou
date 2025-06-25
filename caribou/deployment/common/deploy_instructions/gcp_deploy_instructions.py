@@ -67,7 +67,7 @@ class GCPDeployInstructions(DeployInstructions):
             name="update_function",
             params={
                 "function_name": name,
-                "service_account": Variable(iam_role_varname),
+                "role_identifier": Variable(iam_role_varname),
                 "zip_contents": zip_contents,
                 "runtime": runtime,
                 "handler": handler,
@@ -103,12 +103,12 @@ class GCPDeployInstructions(DeployInstructions):
         )
 
     def _add_function_permission_for_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str
+        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str, cloud_run_name: str
     ) -> Instruction:
         return APICall(
             name="add_pubsub_permission_for_cloud_run",
             params={
-                "service_name": Variable(function_varname),
+                "cloud_run_service_name": cloud_run_name,
                 "service_account_name": Variable(iam_role_varname),
             },
         )

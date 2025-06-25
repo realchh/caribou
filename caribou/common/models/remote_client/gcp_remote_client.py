@@ -789,10 +789,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return subscription_path
         return response.name
 
-    def add_pubsub_permission_for_cloud_run(self, service_name: str, service_account_name: str) -> None:
+    def add_pubsub_permission_for_cloud_run(
+            self, cloud_run_service_name:str, service_account_name: str
+    ) -> None:
         client = self._run_client
 
-        full_name = client.service_path(self._project_id, self._region, service_name)
+        full_name = client.service_path(self._project_id, self._region, cloud_run_service_name)
         policy = client.get_iam_policy(request={"resource": full_name})
 
         invoker_member = f"serviceAccount:{service_account_name}"
