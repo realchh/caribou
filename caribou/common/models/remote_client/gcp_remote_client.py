@@ -421,12 +421,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return client.get_service(name=full_name).uri
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
-        print(f"function name: {function_name}")
-        print(f"image name: {image_name}")
-        workflow_instance_id = "-".join(function_name.split("-")[0:2])
-        print(f"workflow instance id: {workflow_instance_id}")
-        function_name_simple = function_name[len(workflow_instance_id) + 1 :].rsplit("_", 1)[0]
-        print(f"function name simple: {function_name_simple}")
+        workflow_instance_id = "-".join(function_name.split("-")[0:5])
+        function_name_simple = function_name[len(workflow_instance_id) + 1 :]
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 
@@ -437,10 +433,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         document.set({function_name_simple: image_name}, merge=True)
 
     def _get_deployed_image_uri(self, function_name: str) -> str:
-        workflow_instance_id = "-".join(function_name.split("-")[0:2])
-
-        function_name_simple = function_name[len(workflow_instance_id) + 1 :].rsplit("_", 1)[0]
-
+        workflow_instance_id = "-".join(function_name.split("-")[0:5])
+        function_name_simple = function_name[len(workflow_instance_id) + 1 :]
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 

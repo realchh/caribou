@@ -27,7 +27,7 @@ from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClien
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 from caribou.common.provider import Provider
-from caribou.common.utils import generate_workflow_service_account_id
+from caribou.common.utils import generate_workflow_service_account_id, generate_workflow_gcp_function_name
 
 # Set logging level for Boto3 to WARNING to suppress INFO messages
 # Mainly to suppress 'Found credentials in environment variables.' message
@@ -100,6 +100,7 @@ class Client:
         }
 
         json_payload = json.dumps(wrapped_input_data)
+        print(f"Sending payload {json_payload} to function {identifier} in region {region} with provider {provider}")
         self._get_remote_client(provider, region).invoke_function(
             message=json_payload,
             identifier=identifier,
@@ -239,10 +240,26 @@ class Client:
         # Remove entry from the workflow images table
         # (This table is used to track the ECR images of all
         # functions in the workflow)
-        self._endpoints.get_deployment_resources_client().remove_key(
-            CARIBOU_WORKFLOW_IMAGES_TABLE, self._workflow_id.replace(".", "_")
-        )
+        if isinstance(self._endpoints.get_deployment_resources_client(), GCPRemoteClient):
+            workflow_name = self._workflow_id.split("-")[0]
+            workflow_ver = self._workflow_id.split("-")[1]
 
+            gcp_workflow_id = generate_workflow_gcp_function_name(
+                workflow_name,
+                workflow_ver,
+                workflow_name,
+                {"provider": "dummy", "region": "dummy-dummy"},
+            )
+
+            gcp_workflow_id = "-".join(gcp_workflow_id.split("-")[:5])
+            print(f"gcp: removing from caribou workflow images table: {gcp_workflow_id}")
+            self._endpoints.get_deployment_resources_client().remove_key(
+                CARIBOU_WORKFLOW_IMAGES_TABLE, gcp_workflow_id
+            )
+        else:
+            self._endpoints.get_deployment_resources_client().remove_key(
+                CARIBOU_WORKFLOW_IMAGES_TABLE, self._workflow_id.replace(".", "_")
+            )
         # Remove entry from the workflow summary table
         # (This table is produced by the log syncer for the FORGETTING_NUMBER
         # most recent and or relevant workflow runs)
