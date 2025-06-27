@@ -1256,11 +1256,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ):
             size_of_input_payload_gb = len(argument_raw["data"].encode("utf-8")) / (1024**3) if entry_point else -1.0
             base64_data = argument_raw["data"]
-            print("base64 data:", base64_data)
             decoded_data = base64.b64decode(base64_data)
-            print("decoded from base64 data:", decoded_data)
             decoded_data = decompress_json_str(decoded_data)
-            print("decoded json data: ", decoded_data)
             decoded_data = json.loads(decoded_data)
             if "payload" not in decoded_data:
                 caribou_wrapper_argument = {"payload": decoded_data}

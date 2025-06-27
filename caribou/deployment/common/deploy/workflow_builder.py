@@ -51,14 +51,10 @@ class WorkflowBuilder:
             # First, we create the functions (the resources that we deploy to the serverless platform)
             for function in config.workflow_app.functions.values():
                 function_deployment_name = self._get_function_name(config, function, region)
-                print("function deployment name:", function_deployment_name)
-                print("provider:", region["provider"])
                 if region["provider"] == ProviderEnum.GCP.value:
                     function_role = self.get_function_role(config, gcp_workflow_service_account)
-                    print("role name:", function_role.name)
                 else:
                     function_role = self.get_function_role(config, function_deployment_name)
-                    print("role name:", function_role.name)
                 if function.regions_and_providers and "providers" in function.regions_and_providers:
                     providers = (
                         function.regions_and_providers["providers"]
@@ -114,7 +110,6 @@ class WorkflowBuilder:
         index_in_dag = 0
         # We start with the entry point
         entry_point_logical_name = entry_point.handler.split('.')[-1]
-        print(f"Generatig DAG: entry point = {entry_point_logical_name}")
         predecessor_instance = FunctionInstance(
             name=f"{entry_point_logical_name}:entry_point:{index_in_dag}",
             entry_point=entry_point.entry_point,
@@ -136,7 +131,6 @@ class WorkflowBuilder:
             caribou_function: CaribouFunction = function_name_to_function[function_to_visit]
 
             logical_name = caribou_function.handler.split('.')[-1]
-            print(f"Generatig DAG: index = {index_in_dag}: {logical_name} -> {predecessor_instance_name}")
             predecessor_instance_name_for_instance = predecessor_instance_name.split(":", maxsplit=1)[0]
             predecessor_index = predecessor_instance_name.split(":")[-1]
             function_instance_name = (
@@ -165,7 +159,6 @@ class WorkflowBuilder:
             edges.append((predecessor_instance_name, function_instance_name))
 
         functions: list[FunctionInstance] = list(function_instances.values())
-        print(f"final DAG result = {functions}")
         return Workflow(
             resources=home_region_resources,
             functions=functions,
@@ -259,6 +252,7 @@ class WorkflowBuilder:
         resources: list[Function] = []
 
         function_name_to_description_to_update_functions = defaultdict(list)
+        print(f"rebuilding workflow for {config.workflow_name}-{config.workflow_version}")
 
         for function_name, deployment_region in function_to_deployment_region.items():
             if function_name in deployed_regions:
@@ -277,13 +271,23 @@ class WorkflowBuilder:
                     function_name_without_provider_and_region
                 ]:
                     # This is a function that was already deployed and we are adding a new region to it
+                    print(f"adding region {deployment_region['region']} to {function_name}")
+                    function_role: IAMRole
+                    if deployment_region["provider"] == ProviderEnum.GCP.value:
+                        gcp_workflow_service_account = generate_workflow_service_account_id(
+                            config.workflow_name, config.workflow_version
+                        )
+                        function_role = self.get_function_role(config, gcp_workflow_service_account)
+                    else:
+                        function_role = self.get_function_role(config, function_name)
+
                     resources.append(
                         Function(
                             name=function_name,
                             environment_variables=function["environment_variables"],
                             runtime=function["runtime"],
                             handler=function["handler"],
-                            role=IAMRole(function["role"]["policy_file"], f"{function_name}-role"),
+                            role=function_role,
                             deployment_package=DeploymentPackage(),
                             deploy_region=deployment_region,
                             entry_point=function["entry_point"],
