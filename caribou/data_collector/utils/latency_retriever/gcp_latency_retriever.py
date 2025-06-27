@@ -48,9 +48,6 @@ class GCPLatencyRetriever(LatencyRetriever):
         interval.start_time = start_time
         interval.end_time = end_time
 
-        print(f"Querying metric: {GCP_GLOBAL_ZONE_PAIR_RTT_METRIC}")
-        print(f"Time window: {start_time.isoformat()}Z to {end_time.isoformat()}Z")
-
         results = client.list_time_series(
             request={
                 "name": project_name,
@@ -72,7 +69,7 @@ class GCPLatencyRetriever(LatencyRetriever):
             source_region = self._get_region_from_zone(source_zone)
             dest_region = self._get_region_from_zone(dest_zone)
 
-            if source_region == "unknown_region" or dest_region == "unknown_region" or source_region == dest_region:
+            if source_region == "unknown_region" or dest_region == "unknown_region":
                 continue
 
             if series.points:
@@ -97,16 +94,12 @@ class GCPLatencyRetriever(LatencyRetriever):
         _, project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         # Retrieve _percentile_information if not already retrieved
         if not self._percentile_information:
-            # This url returns a table with the latency between all AWS regions
+            # This url returns a table with the latency between all GCP regions
             self._percentile_information = self._get_latency_information(project_id)
 
         region_from_code = region_from["code"]
         if region_from["code"] not in self._percentile_information:
             region_from_code = region_from_code[:-1] + "1"
-        if region_from_code in ["me-central-1", "il-central-1"]:
-            region_from_code = "me-south-1"
-        if region_from_code == "ca-west-1":
-            region_from_code = "us-west-2"
 
         if region_from_code not in self._percentile_information:
             print("Error parsing percentile information, origin region not found: ", region_from_code)
@@ -116,10 +109,6 @@ class GCPLatencyRetriever(LatencyRetriever):
         if region_to["code"] not in self._percentile_information[region_from_code]:
             print(f"Error getting latency: destination {region_to_code} not found in origin  {region_from_code}.")
             region_to_code = region_to_code[:-1] + "1"
-        if region_to_code in ["me-central-1", "il-central-1"]:
-            region_to_code = "me-south-1"
-        if region_to_code == "ca-west-1":
-            region_to_code = "us-west-2"
 
         if region_to_code not in self._percentile_information[region_from_code]:
             return [DEFAULT_LATENCY_VALUE]
@@ -128,7 +117,7 @@ class GCPLatencyRetriever(LatencyRetriever):
 
         log_percentiles = np.log(list(latency_information.values()))
 
-        percentile_ranks = np.array([10, 25, 50, 75, 90, 98, 99]) / 100.0
+        percentile_ranks = np.array([50]) / 100.0
 
         def objective_function(params: list[float], log_percentiles: np.ndarray, percentile_ranks: np.ndarray) -> float:
             mu, sigma = params

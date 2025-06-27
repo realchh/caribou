@@ -155,7 +155,6 @@ def generate_workflow_gcp_function_name(
     # GCP cloud run name has a max length of 49 characters. We use a hash to shorten the name. The name format will
     # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow version>-
     # <first 4 chars of function name>-<last 4 chars of function name>-<hash truncated to 9 chars>
-    print("original function name:", function_name)
     workflow_name = workflow_name.lower().replace("_", "-").replace(".", "-")
     workflow_ver = workflow_ver.lower().replace("_", "-").replace(".", "-")
     function_name = function_name.lower().replace("_", "-").replace(".", "-")
