@@ -25,7 +25,7 @@ caribou deploy
 And then run the benchmark with the following command:
 
 ```bash
-caribou run image_processing-version_number -a '{"image_name": "image_name.jpg", "desired_transformations": ["flip", "rotate", "blur", "greyscale", "resize"]}}'
+caribou run image_processing-version_number -a '{"image_name": "image_name.jpg", "desired_transformations": ["flip", "rotate", "blur", "greyscale", "resize"]}'
 ```
 
 To remove the benchmark, you can use the following command:

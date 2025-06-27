@@ -34,7 +34,7 @@ from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     FIRESTORE_TTL_FIELD_NAME,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
-    SYNC_TABLE_TTL,
+    SYNC_TABLE_TTL, GLOBAL_GCP_SYSTEM_REGION,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str
@@ -52,7 +52,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def __init__(
         self,
         project_id: str | None = "caribou-460422",
-        region: str | None = "us-east1",
+        region: str | None = GLOBAL_GCP_SYSTEM_REGION,
         credentials_path: str | None = None,
     ) -> None:
         if credentials_path:

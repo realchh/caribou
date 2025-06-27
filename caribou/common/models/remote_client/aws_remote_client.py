@@ -441,7 +441,8 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         )
 
         return f"""
-        FROM public.ecr.aws/lambda/{runtime.replace("python", "python:")}
+        FROM public.ecr.aws/lambda/{runtime.replace("python", "python:")}        
+        ENV CARIBOU_DEFAULT_PROVIDER aws
         COPY requirements.txt ./
         {lambda_insight_command}
         {run_command}

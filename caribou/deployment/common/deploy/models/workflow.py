@@ -329,5 +329,5 @@ class Workflow(Resource):
             else:
                 raise RuntimeError("Unexpected Error in function name:", function_name)
 
-            if not function_name.replace("-", "").isalnum():
+            if not function_name.replace("-", "",).replace("_", "").isalnum():
                 raise RuntimeError("Function name must contain only letters, numbers, or underscores")

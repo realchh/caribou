@@ -518,7 +518,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         workflow_placement_decision: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
         # Get the name of the successor function
-        successor_function_name = self.functions[function.original_function.__name__].name  # type: ignore
+        successor_function_name = function.original_function.__name__  # type: ignore
 
         # Set the current instance name based on whether it is the entry point or not
         current_instance_name = workflow_placement_decision["current_instance_name"]
@@ -560,10 +560,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         successor_instances = instance["succeeding_instances"]
         # If there is only one successor instance, return it
         if len(successor_instances) == 1:
-            if (
-                successor_instances[0].split(":", maxsplit=1)[0]
-                == f"{self.name}-{self.version.replace('.', '_')}-{successor_function_name}"
-            ):
+            if successor_instances[0].split(":", maxsplit=1)[0] == successor_function_name:
                 return successor_instances[0]
             raise RuntimeError(
                 f"Could not find successor instance for successor function name {successor_function_name} in {successor_instances}"  # pylint: disable=line-too-long
@@ -573,7 +570,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         for successor_instance in successor_instances:
             if (
                 successor_instance.split(":", maxsplit=1)[0]
-                == f"{self.name}-{self.version.replace('.', '_')}-{successor_function_name}"
+                == successor_function_name
             ):
                 if successor_instance.split(":", maxsplit=2)[1] == "sync":
                     return successor_instance

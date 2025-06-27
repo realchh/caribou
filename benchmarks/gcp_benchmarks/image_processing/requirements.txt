@@ -25,3 +25,5 @@ google-cloud-artifact-registry
 google-cloud-resource-manager
 
 types-protobuf
+
+numpy==2.2.1

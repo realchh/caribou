@@ -134,6 +134,8 @@ class DeploymentPackager:
                 file.write(f"\npytz=={self._pytz_version}\n")
             if "zstandard" not in requirements:
                 file.write(f"\nzstandard=={zstandard.__version__}\n")
+            if "numpy" not in requirements:
+                file.write("\nnumpy==2.2.1\n")
 
     @property
     def _pytz_version(self) -> str:
@@ -321,43 +323,43 @@ class DeploymentPackager:
             if "boto3" not in requirements:
                 requirements.append(f"boto3=={boto3.__version__}")
             if "google-cloud" not in requirements:
-                requirements.append("\ngoogle-cloud==0.34.0\n")
+                requirements.append("google-cloud==0.34.0")
             if "google-cloud-storage" not in requirements:
-                requirements.append(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
+                requirements.append(f"google-cloud-storage=={google.cloud.storage.__version__}")
             if "google-cloud-firestore" not in requirements:
-                requirements.append("\ngoogle-cloud-firestore\n")
+                requirements.append("google-cloud-firestore")
             if "google-cloud-pubsub" not in requirements:
-                requirements.append("\ngoogle-cloud-pubsub==2.29.0\n")
+                requirements.append("google-cloud-pubsub==2.29.0")
             if "google-cloud-logging" not in requirements:
-                requirements.append("\ngoogle-cloud-logging\n")
+                requirements.append("google-cloud-logging")
             if "google-cloud-trace" not in requirements:
-                requirements.append("\ngoogle-cloud-trace==1.16.1\n")
+                requirements.append("google-cloud-trace==1.16.1")
             if "google-cloud-artifact-registry" not in requirements:
-                requirements.append("\ngoogle-cloud-artifact-registry\n")
+                requirements.append("google-cloud-artifact-registry")
             if "google-cloud-eventarc" not in requirements:
-                requirements.append("\ngoogle-cloud-eventarc\n")
+                requirements.append("google-cloud-eventarc")
             if "google-cloud-iam" not in requirements:
-                requirements.append("\ngoogle-cloud-iam\n")
+                requirements.append("google-cloud-iam")
             if "google-cloud-resource-manager" not in requirements:
-                requirements.append("\ngoogle-cloud-resource-manager\n")
+                requirements.append("google-cloud-resource-manager")
             if "google-cloud-run" not in requirements:
-                requirements.append("\ngoogle-cloud-run\n")
+                requirements.append("google-cloud-run")
             if "types-protobuf" not in requirements:
-                requirements.append("\ntypes-protobuf\n")
+                requirements.append("types-protobuf")
             if "functions-framework" not in requirements:
-                requirements.append("\nfunctions-framework==3.*\n")
+                requirements.append("functions-framework==3.*")
             if "opentelemetry-api" not in requirements:
                 opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
-                requirements.append(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
+                requirements.append(f"opentelemetry-api=={opentelemetry_api_version}")
             if "opentelemetry-sdk" not in requirements:
                 opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
-                requirements.append(f"\nopentelemetry-sdk=={opentelemetry_sdk_version}\n")
+                requirements.append(f"opentelemetry-sdk=={opentelemetry_sdk_version}")
             if "opentelemetry-exporter-gcp_trace" not in requirements:
                 opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
-                requirements.append(f"\nopentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}\n")
+                requirements.append(f"opentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}")
             if "opentelemetry-exporter-gcp_logging" not in requirements:
                 opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
-                requirements.append(f"\nopentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}\n")
+                requirements.append(f"opentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}")
 
         # Add version of pyyaml if not present in requirements
         if "pyyaml" not in requirements:
@@ -369,6 +371,10 @@ class DeploymentPackager:
         # Add version of z_standard if not present in requirements
         if "zstandard" not in requirements:
             requirements.append(f"zstandard=={zstandard.__version__}")
+
+        # Add version of numpy 2.2.1 to avoid breaking change in numpy 2.3.0
+        if "numpy" not in requirements:
+            requirements.append("numpy==2.2.1")
 
         temp_install_dir = tempfile.mkdtemp(dir=temp_dir, prefix="temp_install_")
 
