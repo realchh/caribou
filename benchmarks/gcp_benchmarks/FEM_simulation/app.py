@@ -5,15 +5,14 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import json
 from caribou.deployment.client import CaribouWorkflow
-import boto3
 from datetime import datetime
 import logging
 from tempfile import TemporaryDirectory
+from google.cloud import storage
 
 workflow = CaribouWorkflow(name="FEM_simulation", version="0.0.2")
 
-s3_bucket_name = "caribou-fem-simulation"
-s3_bucket_region_name = "us-east-1"
+gcp_bucket_name = "caribou-fem-simulation"
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -101,7 +100,7 @@ def calc_displacement(event: dict[str, Any]) -> dict[str, Any]:
     
     total_displacement = np.sum([np.sum(np.array(event["displacement"])) for event in events])
 
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
 
     result_data = {
         "total_displacement": total_displacement
@@ -111,6 +110,8 @@ def calc_displacement(event: dict[str, Any]) -> dict[str, Any]:
         with open(f"{tmp_dir}/output.txt", "w") as f:
             f.write(json.dumps(result_data))
 
-        s3.upload_file(f"{tmp_dir}/output.txt", s3_bucket_name, f"output/{datetime.now().strftime('%Y%m%d-%H%M%S')}-output.txt")
+        bucket = client.bucket(gcp_bucket_name)
+        blob = bucket.blob(f"output/{datetime.now().strftime('%Y%m%d-%H%M%S')}-output.txt")
+        blob.upload_from_filename(f"{tmp_dir}/output.txt")
 
     return {"status": 200}

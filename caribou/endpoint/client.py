@@ -78,9 +78,6 @@ class Client:
         provider, region, identifier = self._get_initial_node_workflow_placement_decision(
             workflow_placement_decision, send_to_home_region
         )
-        print("provider: ", provider)
-        print("region: ", region)
-        print("identifier: ", identifier)
 
         workflow_placement_decision["send_to_home_region"] = send_to_home_region
 
@@ -100,7 +97,6 @@ class Client:
         }
 
         json_payload = json.dumps(wrapped_input_data)
-        print(f"Sending payload {json_payload} to function {identifier} in region {region} with provider {provider}")
         self._get_remote_client(provider, region).invoke_function(
             message=json_payload,
             identifier=identifier,

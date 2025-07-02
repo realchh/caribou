@@ -5,16 +5,15 @@ from caribou.deployment.client import CaribouWorkflow
 import json
 from gtts import gTTS
 from io import BytesIO
-import boto3
+from google.cloud import storage
 from profanity import profanity as prfnty
 from pydub import AudioSegment
 
 from tempfile import TemporaryDirectory
 
 # Change the following bucket name and region to match your setup
-s3_bucket_name = "caribou-text-2-speech-censoring-naufal"
-s3_bucket_region_name = "us-east-1"
-polly_region_name = s3_bucket_region_name # Note AWS Polly is not available in all regions
+gcs_bucket_name = "caribou-text-2-speech-censoring-naufal"
+# polly_region_name = "us-east-1" # Note AWS Polly is not available in all regions
 
 workflow = CaribouWorkflow(name="text_2_speech_censoring", version="0.0.1")
 
@@ -55,11 +54,13 @@ def profanity(event: dict[str, Any]) -> dict[str, Any]:
     input_file = event["input_file"]
     output_folder_name = event["output_folder_name"]
 
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
     with TemporaryDirectory() as tmp_dir:
         local_name = f"{tmp_dir}/input.txt"
 
-        s3.download_file(s3_bucket_name, input_file, local_name)
+        bucket = client.bucket(gcs_bucket_name)
+        blob = bucket.blob(input_file)
+        blob.download_to_filename(local_name)
 
         with open(local_name, "r") as f:
             message = f.read()
@@ -76,11 +77,8 @@ def profanity(event: dict[str, Any]) -> dict[str, Any]:
 
         remote_file_name = f"output/{output_folder_name}/intermediate_files/cencoring_indexes.json"
 
-        s3.upload_file(
-            local_file_name,
-            s3_bucket_name,
-            remote_file_name,
-        )
+        blob = bucket.blob(remote_file_name)
+        blob.upload_from_filename(local_file_name)
 
         payload = {
             "index_file": remote_file_name,
@@ -97,59 +95,61 @@ def text_2_speech(event: dict[str, Any]) -> dict[str, Any]:
     input_file = event["input_file"]
     output_folder_name = event["output_folder_name"]
     t2s_service: str = event["t2s_service"]
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
     with TemporaryDirectory() as tmp_dir:
         local_name = f"{tmp_dir}/input.txt"
 
-        s3.download_file(s3_bucket_name, input_file, local_name)
+        bucket = client.bucket(gcs_bucket_name)
+        blob = bucket.blob(input_file)
+        blob.download_to_filename(local_name)
 
         with open(local_name, "r") as f:
             message = f.read()
 
         # Convert text to speech (Either using Polly or gTTS)
-        if t2s_service.lower() == "polly":
-            polly = boto3.client("polly", region_name=polly_region_name)
-            # Check if the message is too long for Polly
-            # If it is, split it into smaller chunks, else
-            # we directly convert it to speech (< 1500 characters)
-            if len(message) > 1500:
-                print("Splitting the message into smaller chunks, current length:", len(message))
-                chunks = split_text(message)
-                print("Number of chunks:", len(chunks))
-                audio_files = []
-
-                for i, chunk in enumerate(chunks):
-                    response = polly.synthesize_speech(
-                        Text=chunk,
-                        OutputFormat="mp3",
-                        VoiceId="Joanna"
-                    )
-
-                    chunk_file_name = f"chunk_{i}.mp3"
-                    chunk_local_name = os.path.join(tmp_dir, chunk_file_name)
-                    with open(chunk_local_name, "wb") as f:
-                        f.write(response['AudioStream'].read())
-                    audio_files.append(chunk_local_name)
-
-                # Concatenate audio files
-                combined = AudioSegment.empty()
-                for file in audio_files:
-                    segment = AudioSegment.from_mp3(file)
-                    combined += segment
-
-                # Get the audio stream from the combined audio
-                mp3_fp = BytesIO()
-                combined.export(mp3_fp, format="mp3")
-                result = mp3_fp.getvalue()
-            else:
-                response = polly.synthesize_speech(
-                    Text=message,
-                    OutputFormat="mp3",
-                    VoiceId="Amy",  # You can choose a different voice if you prefer
-                    Engine="standard"
-                )
-                result = response['AudioStream'].read()
-        elif t2s_service.lower() == "gtts":
+        # if t2s_service.lower() == "polly":
+        #     polly = boto3.client("polly", region_name=polly_region_name)
+        #     # Check if the message is too long for Polly
+        #     # If it is, split it into smaller chunks, else
+        #     # we directly convert it to speech (< 1500 characters)
+        #     if len(message) > 1500:
+        #         print("Splitting the message into smaller chunks, current length:", len(message))
+        #         chunks = split_text(message)
+        #         print("Number of chunks:", len(chunks))
+        #         audio_files = []
+        #
+        #         for i, chunk in enumerate(chunks):
+        #             response = polly.synthesize_speech(
+        #                 Text=chunk,
+        #                 OutputFormat="mp3",
+        #                 VoiceId="Joanna"
+        #             )
+        #
+        #             chunk_file_name = f"chunk_{i}.mp3"
+        #             chunk_local_name = os.path.join(tmp_dir, chunk_file_name)
+        #             with open(chunk_local_name, "wb") as f:
+        #                 f.write(response['AudioStream'].read())
+        #             audio_files.append(chunk_local_name)
+        #
+        #         # Concatenate audio files
+        #         combined = AudioSegment.empty()
+        #         for file in audio_files:
+        #             segment = AudioSegment.from_mp3(file)
+        #             combined += segment
+        #
+        #         # Get the audio stream from the combined audio
+        #         mp3_fp = BytesIO()
+        #         combined.export(mp3_fp, format="mp3")
+        #         result = mp3_fp.getvalue()
+        #     else:
+        #         response = polly.synthesize_speech(
+        #             Text=message,
+        #             OutputFormat="mp3",
+        #             VoiceId="Amy",  # You can choose a different voice if you prefer
+        #             Engine="standard"
+        #         )
+        #         result = response['AudioStream'].read()
+        if t2s_service.lower() == "gtts":
             tts = gTTS(message, lang="en")
             mp3_fp = BytesIO()
             tts.write_to_fp(mp3_fp)
@@ -165,11 +165,8 @@ def text_2_speech(event: dict[str, Any]) -> dict[str, Any]:
 
         remote_name = f"output/{output_folder_name}/intermediate_files/{file_name}"
 
-        s3.upload_file(
-            local_name,
-            s3_bucket_name,
-            remote_name,
-        )
+        blob = bucket.blob(remote_name)
+        blob.upload_from_filename(local_name)
 
         payload = {
             "file_name": remote_name,
@@ -185,11 +182,13 @@ def encoding(event: dict[str, Any]) -> dict[str, Any]:
     file_name = event["file_name"]
     output_folder_name = event["output_folder_name"]
 
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
     with TemporaryDirectory() as tmp_dir:
         local_name = f"{tmp_dir}/input.txt"
 
-        s3.download_file(s3_bucket_name, file_name, local_name)
+        bucket = client.bucket(gcs_bucket_name)
+        blob = bucket.blob(file_name)
+        blob.download_to_filename(local_name)
 
         dlFile = open(local_name, "rb").read()
         input = BytesIO(dlFile)
@@ -206,11 +205,10 @@ def encoding(event: dict[str, Any]) -> dict[str, Any]:
             f.write(result)
 
         remote_file_name = f"output/{output_folder_name}/intermediate_files/{file_name}"
-        s3.upload_file(
-            local_file_name,
-            s3_bucket_name,
-            remote_file_name,
-        )
+
+        blob = bucket.blob(remote_file_name)
+        blob.upload_from_filename(local_file_name)
+
         payload = {
             "file_name": remote_file_name,
             "output_folder_name": output_folder_name,
@@ -235,13 +233,16 @@ def censor(event: dict[str, Any]) -> dict[str, Any]:
     if not "file_name" or not "data":
         raise ValueError("No file name or data provided")
 
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
     with TemporaryDirectory() as tmp_dir:
         local_index_name = f"{tmp_dir}/indexes.json"
-        s3.download_file(s3_bucket_name, index_file, local_index_name)
+        bucket = client.bucket(gcs_bucket_name)
+        blob = bucket.blob(index_file)
+        blob.download_to_filename(local_index_name)
 
         local_wav_name = f"{tmp_dir}/speech.wav"
-        s3.download_file(s3_bucket_name, file_name, local_wav_name)
+        blob = bucket.blob(file_name)
+        blob.download_to_filename(local_wav_name)
 
         dlFile = open(local_wav_name, "rb").read()
         dlFile = BytesIO(dlFile)
@@ -273,11 +274,8 @@ def censor(event: dict[str, Any]) -> dict[str, Any]:
         with open(os.path.join(tmp_dir, file_name), "wb") as f:
             f.write(result)
 
-        s3.upload_file(
-            os.path.join(tmp_dir, file_name),
-            s3_bucket_name,
-            f"output/{output_folder_name}/{file_name}",
-        )
+        blob = bucket.blob(f"output/{output_folder_name}/{file_name}")
+        blob.upload_from_filename(os.path.join(tmp_dir, file_name))
 
     return {"status": 200}
 

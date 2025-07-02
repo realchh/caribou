@@ -5,9 +5,9 @@ import boto3
 import json
 from tempfile import TemporaryDirectory
 from caribou.deployment.client import CaribouWorkflow
+from google.cloud import storage
 
-s3_bucket_name = "caribou-markdown-to-html"
-s3_bucket_region_name = "us-east-1"
+gcs_bucket_name = "caribou-markdown-to-html"
 
 workflow = CaribouWorkflow(name="markdown_to_html", version="0.0.1")
 
@@ -25,10 +25,12 @@ def markdown_to_html(event: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError("No filename provided")
 
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+    client = storage.Client()
     
     with TemporaryDirectory() as tmp_dir:
-        s3.download_file(s3_bucket_name, filename, f"{tmp_dir}/{filename}")
+        bucket = client.bucket(gcs_bucket_name)
+        blob = bucket.blob(filename)
+        blob.download_to_filename(f"{tmp_dir}/{filename}")
 
         with open(f"{tmp_dir}/{filename}", "r") as f:
             markdown_text = f.read()
@@ -39,6 +41,7 @@ def markdown_to_html(event: dict[str, Any]) -> dict[str, Any]:
         with open(f"{tmp_dir}/{filename}.html", "w") as f:
             f.write(html_text)
         
-        s3.upload_file(f"{tmp_dir}/{filename}.html", s3_bucket_name, f"output/{filename}.html")
+        blob = bucket.blob(f"output/{filename}.html")
+        blob.upload_from_filename(f"{tmp_dir}/{filename}.html")
 
     return {"status": 200}

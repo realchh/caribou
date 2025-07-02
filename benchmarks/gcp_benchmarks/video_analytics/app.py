@@ -1,6 +1,5 @@
 from typing import Any
 import json
-import boto3
 import cv2
 from tempfile import TemporaryDirectory
 import os
@@ -14,12 +13,12 @@ import torch
 from torchvision import models
 import zipfile
 from copy import deepcopy
+from google.cloud import storage
 
 MAX_FANOUT_NUM = 6
 
 # Change the following bucket name and region to match your setup
-s3_bucket_name = "caribou-video-analytics-naufal"
-s3_bucket_region_name = "us-east-1"
+cloud_storage_bucket_name = "caribou-video-analytics-naufal"
 
 workflow = CaribouWorkflow(name="video_analytics", version="0.0.2")
 
@@ -80,10 +79,12 @@ def decode(event: dict[str, Any]) -> dict[str, Any]:
         # Make sure the directory exists
         os.makedirs(os.path.dirname(local_streaming_filepath), exist_ok=True)
 
-        s3 = boto3.client("s3", region_name=s3_bucket_region_name)
+        client = storage.Client()
 
-        # Download the video file from S3
-        s3.download_file(s3_bucket_name, streaming_filepath, local_streaming_filepath)
+        # Download the video file from GCS
+        bucket = client.bucket(cloud_storage_bucket_name)
+        blob = bucket.blob(streaming_filepath)
+        blob.download_to_filename(local_streaming_filepath)
 
         # Calculate the number of partitions needed if not specified
         if fanout_num == -1:
@@ -147,8 +148,10 @@ def recognition(event: dict[str, Any]) -> dict[str, Any]:
         os.makedirs(os.path.dirname(local_decode_filepath), exist_ok=True)
 
         # Download the zip file of image shards from S3
-        s3 = boto3.client("s3", region_name=s3_bucket_region_name)
-        s3.download_file(s3_bucket_name, decoded_filepath, local_decode_filepath)
+        client = storage.Client()
+        bucket = client.bucket(cloud_storage_bucket_name)
+        blob = bucket.blob(decoded_filepath)
+        blob.download_to_filename(local_decode_filepath)
         
         # Unzip the file into a folder
         decode_folder_local_path = os.path.join(tmp_dir, f"decoded-{partition_id}")
@@ -182,7 +185,9 @@ def recognition(event: dict[str, Any]) -> dict[str, Any]:
         recognition_filepath = f"output/{output_folder_name}/intermediate_files/recognition_results-{partition_id}.json"
         with open(os.path.join(tmp_dir, "recognition_results.json"), 'w') as f:
             json.dump(recognition_results, f)
-        s3.upload_file(os.path.join(tmp_dir, "recognition_results.json"), s3_bucket_name, recognition_filepath)
+
+        upload_blob = bucket.blob(recognition_filepath)
+        upload_blob.upload_from_filename(os.path.join(tmp_dir, "recognition_results.json"))
 
         payload = {
             "video_name": video_name,
@@ -209,9 +214,10 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
         os.makedirs(os.path.dirname(local_decode_filepath), exist_ok=True)
 
         # Load model labels
-        s3 = boto3.client("s3", region_name=s3_bucket_region_name)
-        response = s3.get_object(Bucket=s3_bucket_name, Key="imagenet_labels.txt")
-        image_net_labels = response["Body"].read().decode("utf-8").splitlines()
+        client = storage.Client()
+        bucket = client.bucket(cloud_storage_bucket_name)
+        blob = bucket.get_blob("imagenet_labels.txt")
+        image_net_labels = blob.download_as_text().splitlines()
 
         ordered_results: list[str] = []
 
@@ -220,7 +226,8 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
             recognition_filepath = result["recognition_filepath"]
 
             # Download the recognition results from S3
-            s3.download_file(s3_bucket_name, recognition_filepath, os.path.join(tmp_dir, "recognition_results.json"))
+            blob = bucket.get_blob(recognition_filepath)
+            blob.download_to_filename(os.path.join(tmp_dir, "recognition_results.json"))
 
             # Load the recognition results
             with open(os.path.join(tmp_dir, "recognition_results.json"), 'r') as f:
@@ -244,8 +251,9 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
         local_consolidation_results_path = os.path.join(tmp_dir, f"video_frame_imagenet_labels.txt")
         with open(local_consolidation_results_path, 'w') as f:
             f.write("\n".join(ordered_results))
-        
-        s3.upload_file(local_consolidation_results_path, s3_bucket_name, remote_consolidation_results_path)
+
+        blob = bucket.blob(remote_consolidation_results_path)
+        blob.upload_from_filename(local_consolidation_results_path)
 
         return {"status": 200}
 
@@ -259,16 +267,19 @@ def video_analytics_streaming(video_name: str, output_folder_name: str) -> str:
         # Make sure the directory exists
         os.makedirs(os.path.dirname(local_filepath), exist_ok=True)
 
-        s3 = boto3.client("s3", region_name=s3_bucket_region_name)
-
         # Download the file from S3
-        s3.download_file(s3_bucket_name, remote_filepath, local_filepath)
+        client = storage.Client()
+        bucket = client.bucket(cloud_storage_bucket_name)
+        blob = bucket.blob(remote_filepath)
+        blob.download_to_filename(local_filepath)
 
         resized_local_filename = resize_and_store(local_filepath, tmp_dir)
 
         output_folder_path = f"output/{output_folder_name}/intermediate_files"
         remote_streaming_filepath = f"{output_folder_path}/streaming-{video_name}"
-        s3.upload_file(resized_local_filename, s3_bucket_name, remote_streaming_filepath)
+
+        upload_blob = bucket.blob(remote_streaming_filepath)
+        upload_blob.upload_from_filename(resized_local_filename)
 
         return remote_streaming_filepath
 
@@ -334,8 +345,10 @@ def video_analytics_decode(tmp_dir: str, local_streaming_filepath: str, output_f
 
     # Upload the zip file to S3
     remote_decoded_zip_filepath = f"output/{output_folder_name}/intermediate_files/{zip_filename}"
-    s3 = boto3.client("s3", region_name=s3_bucket_region_name)
-    s3.upload_file(local_zip_filepath, s3_bucket_name, remote_decoded_zip_filepath)
+    client = storage.Client()
+    bucket = client.bucket(cloud_storage_bucket_name)
+    blob = bucket.blob(remote_decoded_zip_filepath)
+    blob.upload_from_filename(local_zip_filepath)
 
     # Return the S3 path to the zip file
     return remote_decoded_zip_filepath

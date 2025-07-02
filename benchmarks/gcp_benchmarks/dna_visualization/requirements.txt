@@ -1,6 +1,5 @@
 dna-features-viewer
 google-cloud-storage
-google-cloud-artifact_registry
 google-cloud-eventarc
 google-cloud-iam
 google-cloud-resource_manager
@@ -21,7 +20,5 @@ functions-framework==3.*
 boto3==1.35.3
 google-cloud==0.34.0
 types-protobuf
-
 google-cloud-artifact-registry
-
 google-cloud-resource-manager

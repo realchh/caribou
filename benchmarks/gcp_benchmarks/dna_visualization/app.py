@@ -10,7 +10,7 @@ import google.cloud.storage as gcs
 
 
 # Change the following bucket name and region to match your setup
-gcp_bucket_name = "caribou-dna-visualization"
+gcp_bucket_name = "caribou-dna-visualization-naufal"
 
 workflow = CaribouWorkflow(name="dna_visualization", version="0.0.1")
 
