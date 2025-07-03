@@ -672,6 +672,7 @@ class TestAWSRemoteClient(unittest.TestCase):
         result = client._generate_dockerfile("python", "handler.handler", [])
         expected_result = """
         FROM public.ecr.aws/lambda/python:
+        ENV CARIBOU_DEFAULT_PROVIDER aws
         COPY requirements.txt ./
         RUN curl -O https://lambda-insights-extension.s3-ap-northeast-1.amazonaws.com/amazon_linux/lambda-insights-extension.rpm && rpm -U lambda-insights-extension.rpm && rm -f lambda-insights-extension.rpm
         
