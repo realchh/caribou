@@ -3,7 +3,7 @@ import logging
 import random
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import botocore.exceptions
 import google.api_core.exceptions
@@ -27,7 +27,7 @@ from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClien
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 from caribou.common.provider import Provider
-from caribou.common.utils import generate_workflow_service_account_id, generate_workflow_gcp_function_name
+from caribou.common.utils import generate_workflow_gcp_function_name, generate_workflow_service_account_id
 
 # Set logging level for Boto3 to WARNING to suppress INFO messages
 # Mainly to suppress 'Found credentials in environment variables.' message
@@ -249,9 +249,7 @@ class Client:
 
             gcp_workflow_id = "-".join(gcp_workflow_id.split("-")[:5])
             print(f"gcp: removing from caribou workflow images table: {gcp_workflow_id}")
-            self._endpoints.get_deployment_resources_client().remove_key(
-                CARIBOU_WORKFLOW_IMAGES_TABLE, gcp_workflow_id
-            )
+            self._endpoints.get_deployment_resources_client().remove_key(CARIBOU_WORKFLOW_IMAGES_TABLE, gcp_workflow_id)
         else:
             self._endpoints.get_deployment_resources_client().remove_key(
                 CARIBOU_WORKFLOW_IMAGES_TABLE, self._workflow_id.replace(".", "_")
@@ -270,27 +268,28 @@ class Client:
         print(f"Removed workflow {self._workflow_id}")
 
     def _remove_workflow(self, deployment_manager_config_json: str) -> None:
+        print("deployment_manager_config_json:", deployment_manager_config_json)
         deployment_manager_config = json.loads(deployment_manager_config_json)
         deployed_region_json = deployment_manager_config.get("deployed_regions")
         deployed_region: dict[str, dict[str, Any]] = json.loads(deployed_region_json)
 
-        gcp_regions = set()
-        aws_regions = set()
+        gcp_regions: set[str] = set()
+        aws_regions: set[str] = set()
 
         for function_physical_instance, provider_region in deployed_region.items():
-            deployed_region = provider_region["deploy_region"]
-            print(f"removing function {function_physical_instance} from {deployed_region}")
+            deploy_region: dict[str, str] = provider_region["deploy_region"]
+            print(f"removing function {function_physical_instance} from {deploy_region}")
             self._remove_function_instance(function_physical_instance, provider_region["deploy_region"])
 
             if deployed_region.get("provider") == Provider.GCP.value:
-                gcp_regions.add(deployed_region["region"])
+                gcp_regions.add(deploy_region["region"])
             elif deployed_region.get("provider") == Provider.AWS.value:
-                aws_regions.add(deployed_region["region"])
+                aws_regions.add(deploy_region["region"])
 
         if gcp_regions:
             gcp_region = next(iter(gcp_regions))
             gcp_region_client = self._get_remote_client(Provider.GCP.value, gcp_region)
-            self._remove_shared_gcp_resource(gcp_region_client)
+            self._remove_shared_gcp_resource(cast(GCPRemoteClient, gcp_region_client))
 
     def _remove_function_instance(self, function_instance: str, provider_region: dict[str, str]) -> None:
         provider = provider_region["provider"]
@@ -351,6 +350,9 @@ class Client:
 
     def _remove_shared_gcp_resource(self, gcp_region_client: GCPRemoteClient) -> None:
         print(f"removing shared GCP resource (service account) for workflow {self._workflow_id}")
+        if self._workflow_id is None:
+            return
+
         workflow_name = self._workflow_id.split("-")[0]
         workflow_version = self._workflow_id.split("-")[1]
 

@@ -32,9 +32,10 @@ from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
     FIRESTORE_TTL_FIELD_NAME,
+    GLOBAL_GCP_SYSTEM_REGION,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
-    SYNC_TABLE_TTL, GLOBAL_GCP_SYSTEM_REGION,
+    SYNC_TABLE_TTL,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str

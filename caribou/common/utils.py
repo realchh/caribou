@@ -86,6 +86,7 @@ def decompress_json_str(compressed_bytes: bytes) -> str:
 
     return json_str
 
+
 def generate_workflow_service_account_id(workflow_name: str, workflow_ver: str) -> str:
     # GCP service account has a max length of 30 characters. We use a hash to shorten the name. The SA format will
     # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow id>-<hash truncated to 9 chars>
@@ -150,7 +151,7 @@ def get_region_abbreviation(region: str) -> str:
 
 
 def generate_workflow_gcp_function_name(
-        workflow_name: str, workflow_ver: str, function_name: str, region: dict[str, str]
+    workflow_name: str, workflow_ver: str, function_name: str, provider_and_region: dict[str, str]
 ) -> str:
     # GCP cloud run name has a max length of 49 characters. We use a hash to shorten the name. The name format will
     # be <first 4 chars of workflow name>-<last 4 chars of workflow name>-<workflow version>-
@@ -159,9 +160,9 @@ def generate_workflow_gcp_function_name(
     workflow_ver = workflow_ver.lower().replace("_", "-").replace(".", "-")
     function_name = function_name.lower().replace("_", "-").replace(".", "-")
 
-    provider = region["provider"]
-    country = region["region"].split("-")[0]
-    region = region["region"].split("-")[1]
+    provider = provider_and_region["provider"]
+    country = provider_and_region["region"].split("-")[0]
+    region = provider_and_region["region"].split("-")[1]
 
     country = get_country_abbreviation(country)
     region = get_region_abbreviation(region)

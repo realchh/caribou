@@ -30,9 +30,10 @@ from caribou.common.provider import Provider
 from caribou.common.utils import decompress_json_str, get_function_source
 from caribou.deployment.client.caribou_function import CaribouFunction
 
-if 'K_SERVICE' in os.environ:
+if "K_SERVICE" in os.environ:
     # We are in GCP, so we need to set up the gcp logging client.
     import google.cloud.logging
+
     gcp_logging_client = google.cloud.logging.Client()
     gcp_logging_client.setup_logging()
 
@@ -574,10 +575,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # If there are multiple successor instances, return the first one that matches the successor function
         # name and has the correct index
         for successor_instance in successor_instances:
-            if (
-                successor_instance.split(":", maxsplit=1)[0]
-                == successor_function_name
-            ):
+            if successor_instance.split(":", maxsplit=1)[0] == successor_function_name:
                 if successor_instance.split(":", maxsplit=2)[1] == "sync":
                     return successor_instance
                 if successor_instance.split(":", maxsplit=2)[1].split("_")[-1] == str(
@@ -1263,12 +1261,12 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             size_of_input_payload_gb = len(argument_raw["data"].encode("utf-8")) / (1024**3) if entry_point else -1.0
             base64_data = argument_raw["data"]
             decoded_data = base64.b64decode(base64_data)
-            decoded_data = decompress_json_str(decoded_data)
-            decoded_data = json.loads(decoded_data)
-            if "payload" not in decoded_data:
-                caribou_wrapper_argument = {"payload": decoded_data}
+            json_string = decompress_json_str(decoded_data)
+            decoded_json = json.loads(json_string)
+            if "payload" not in decoded_json:
+                caribou_wrapper_argument = {"payload": decoded_json}
             else:
-                caribou_wrapper_argument = decoded_data
+                caribou_wrapper_argument = decoded_json
         else:
             # For non-SNS invocations, the argument is already a dictionary
             # the argument is simply the event (argument_raw).
