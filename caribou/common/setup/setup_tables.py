@@ -1,4 +1,3 @@
-# TODO: Add setup tables in GCP
 import logging
 import os
 import time

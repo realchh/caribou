@@ -30,6 +30,12 @@ from caribou.common.provider import Provider
 from caribou.common.utils import decompress_json_str, get_function_source
 from caribou.deployment.client.caribou_function import CaribouFunction
 
+if 'K_SERVICE' in os.environ:
+    # We are in GCP, so we need to set up the gcp logging client.
+    import google.cloud.logging
+    gcp_logging_client = google.cloud.logging.Client()
+    gcp_logging_client.setup_logging()
+
 # Alter the logging to use CARIBOU level instead of info
 CARIBOU_LEVEL = 25
 logging.addLevelName(CARIBOU_LEVEL, "CARIBOU")

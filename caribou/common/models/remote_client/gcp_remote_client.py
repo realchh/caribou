@@ -51,7 +51,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def __init__(
         self,
-        project_id: str | None = "caribou-460422",
+        project_id: str | None = None,
         region: str | None = GLOBAL_GCP_SYSTEM_REGION,
         credentials_path: str | None = None,
     ) -> None:

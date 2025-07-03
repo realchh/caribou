@@ -1,14 +1,13 @@
 # DNA Visualization benchmark
 
-Original source: [https://github.com/ddps-lab/serverless-faas-workbench](https://github.com/spcl/serverless-benchmarks/) (the original repository's license file is included in this directory).
+Original source: [https://github.com/ddps-lab/serverless-faas-workbench](https://github.com/spcl/serverless-benchmarks/) 
+(the original repository's license file is included in this directory).
 Source for the adapted version used by us: [https://github.com/ubc-cirrus-lab/unfaasener](https://github.com/ubc-cirrus-lab/unfaasener)
 
-This benchmark requires access to the Google Cloud Storage bucket named `caribou-dna-visualization`,
-with the AWS Region set to `us-east-1` (N. Virginia).
+This benchmark requires access to the Google Cloud Storage bucket named `caribou-dna-visualization`
 
-Alternatively, the user may change the S3 bucket name and region in `app.py`,
-by changing the values of `s3_bucket_name` and `s3_bucket_region_name` to the
-desired bucket.
+Alternatively, the user may change the Google Cloud Storage bucket name and region in `app.py`,
+by changing the values of `gcp_bucket_name` to the desired bucket.
 
 There needs to be a file in the bucket, for example `sequence.gb`, in a folder called `genbank`,
 or a valid DNA sequence input from <https://www.ncbi.nlm.nih.gov/genbank/>.

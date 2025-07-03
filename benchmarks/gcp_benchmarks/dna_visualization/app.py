@@ -38,7 +38,6 @@ def visualize(event: dict[str, Any]) -> dict[str, Any]:
     source_blob_name = f"genbank/{gen_file_name}"
     blob = bucket.blob(source_blob_name)
     blob.download_to_filename(local_gen_filename)
-    print(f"Downloaded object genbank/{gen_file_name} from bucket {gcp_bucket_name} to local file {local_gen_filename}")
 
     graphic_record = BiopythonTranslator().translate_record(local_gen_filename)
     ax, _ = graphic_record.plot(figure_width=10, strand_in_label_threshold=7)
@@ -51,7 +50,6 @@ def visualize(event: dict[str, Any]) -> dict[str, Any]:
     destination_blob_name = f"result/{gen_file_name}.png"
     blob_to_upload = bucket.blob(destination_blob_name)
     blob_to_upload.upload_from_filename(local_result_filename)
-    print(f"Uploaded {local_result_filename} to gs://{gcp_bucket_name}/{destination_blob_name}")
 
     os.remove(local_gen_filename)
     os.remove(local_result_filename)
