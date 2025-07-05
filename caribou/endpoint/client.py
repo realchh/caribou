@@ -248,7 +248,6 @@ class Client:
             )
 
             gcp_workflow_id = "-".join(gcp_workflow_id.split("-")[:5])
-            print(f"gcp: removing from caribou workflow images table: {gcp_workflow_id}")
             self._endpoints.get_deployment_resources_client().remove_key(CARIBOU_WORKFLOW_IMAGES_TABLE, gcp_workflow_id)
         else:
             self._endpoints.get_deployment_resources_client().remove_key(
@@ -268,7 +267,6 @@ class Client:
         print(f"Removed workflow {self._workflow_id}")
 
     def _remove_workflow(self, deployment_manager_config_json: str) -> None:
-        print("deployment_manager_config_json:", deployment_manager_config_json)
         deployment_manager_config = json.loads(deployment_manager_config_json)
         deployed_region_json = deployment_manager_config.get("deployed_regions")
         deployed_region: dict[str, dict[str, Any]] = json.loads(deployed_region_json)

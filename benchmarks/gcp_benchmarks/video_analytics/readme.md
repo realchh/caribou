@@ -2,11 +2,10 @@
 
 Original source: [https://github.com/vhive-serverless/vSwarm](https://github.com/vhive-serverless/vSwarm) (the original repository's license file is included in this directory)
 
-This benchmark requires access to the S3 bucket named `caribou-video-analytics`,
-with the AWS Region set to `us-east-1` (N. Virginia).
+This benchmark requires access to the Google Cloud Storage bucket named `caribou-video-analytics`
 
-Alternatively, the user may change the S3 bucket name and region in `app.py`,
-by changing the values of `s3_bucket_name` and `s3_bucket_region_name` to the
+Alternatively, the user may change the Google Cloud Storage bucket name in `app.py`,
+by changing the values of `gcp_bucket_name` to the
 desired bucket.
 
 There needs to be an video file in the bucket, for example `video.mp4`, in a folder

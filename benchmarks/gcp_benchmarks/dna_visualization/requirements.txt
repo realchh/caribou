@@ -22,5 +22,4 @@ google-cloud==0.34.0
 types-protobuf
 google-cloud-artifact-registry
 google-cloud-resource-manager
-
 numpy==2.2.1

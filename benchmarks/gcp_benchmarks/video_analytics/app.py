@@ -1,12 +1,13 @@
+import time
 from typing import Any
 import json
 import cv2
 from tempfile import TemporaryDirectory
 import os
+
+import google.api_core.exceptions
 from torchvision import transforms
 from PIL import Image
-import torch
-import torchvision.models as models
 from caribou.deployment.client import CaribouWorkflow
 import io
 import torch
@@ -49,7 +50,7 @@ def streaming(event: dict[str, Any]) -> dict[str, Any]:
     fanout_num = int(event.get("fanout_num", -1))
     fanout_num = 1 if fanout_num == 0 else fanout_num # If fanout of 0, then it means only 1 task (no fanout)
     # Verify that fanout is either -1 or a positive 
-    # integer and less than or equal to 4
+    # integer and less than or equal to 6
     if fanout_num != -1 and (fanout_num < 1 or fanout_num > 6):
         raise ValueError("Fanout number must be -1 (indicating automatic) or a positive integer less than or equal than 6")
 
@@ -216,7 +217,7 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
         # Load model labels
         client = storage.Client()
         bucket = client.bucket(cloud_storage_bucket_name)
-        blob = bucket.get_blob("imagenet_labels.txt")
+        blob = bucket.blob("imagenet_labels.txt")
         image_net_labels = blob.download_as_text().splitlines()
 
         ordered_results: list[str] = []
@@ -224,10 +225,25 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
         consolidated_labels_dict = {}
         for result in results:
             recognition_filepath = result["recognition_filepath"]
-
+            print(f"DEBUG: Downloading file {recognition_filepath} from GCS...")
             # Download the recognition results from S3
-            blob = bucket.get_blob(recognition_filepath)
-            blob.download_to_filename(os.path.join(tmp_dir, "recognition_results.json"))
+            blob = bucket.blob(recognition_filepath)
+
+            max_retries = 3
+            retry_delay = 2
+
+            for attempt in range(max_retries):
+                try:
+                    blob.download_to_filename(os.path.join(tmp_dir, "recognition_results.json"))
+                    print(f"Downloaded recognition results {recognition_filepath} from GCS, attempt {attempt + 1} of {max_retries}")
+                except google.api_core.exceptions.NotFound:
+                    print(f"attempt {attempt + 1}/{max_retries}: Object {recognition_filepath} not found, retrying in {retry_delay} seconds...")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        print(f"Could not find object {recognition_filepath} after {max_retries} attempts, skipping this partition.")
+                        raise
 
             # Load the recognition results
             with open(os.path.join(tmp_dir, "recognition_results.json"), 'r') as f:

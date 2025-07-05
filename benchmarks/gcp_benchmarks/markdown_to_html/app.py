@@ -1,7 +1,6 @@
 from typing import Any
 import markdown
 import base64
-import boto3
 import json
 from tempfile import TemporaryDirectory
 from caribou.deployment.client import CaribouWorkflow

@@ -473,8 +473,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         ENV PYTHONPATH /app
         ENV CARIBOU_DEFAULT_PROVIDER gcp
         COPY requirements.txt ./
-        {run_command}
         USER root
+        {run_command}
         RUN apt-get update && \
             apt-get install -y --no-install-recommends \
                 libsqlite3-0 \

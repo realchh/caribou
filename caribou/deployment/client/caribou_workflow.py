@@ -447,6 +447,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             successor_workflow_placement_decision = self.get_successor_workflow_placement_decision_dictionary(
                 workflow_placement_decision, successor_instance_name
             )
+            print(f"workflow placement decision: {workflow_placement_decision}")
+            print(f"successor workflow placement decision: {successor_workflow_placement_decision}")
             transmission_taint = uuid.uuid4().hex
             payload_wrapper: dict[str, Any] = {
                 "workflow_placement_decision": successor_workflow_placement_decision,
@@ -456,7 +458,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             # payload_wrapper["workflow_placement_decision"] = successor_workflow_placement_decision
             # payload_wrapper["transmission_taint"] = transmission_taint
             json_payload = json.dumps(payload_wrapper)
-
+            print(f"DEBUG: Invoking sync node with payload: {json_payload}")
             _, _, _, _, _ = self._get_remote_client(provider, region).invoke_function(
                 message=json_payload,
                 identifier=identifier,
@@ -566,8 +568,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         instance = workflow_placement_decision["instances"][current_instance_name]
         successor_instances = instance["succeeding_instances"]
         # If there is only one successor instance, return it
+        print(f"DEBUG successor_instances: {successor_instances}")
         if len(successor_instances) == 1:
-            if successor_instances[0].split(":", maxsplit=1)[0] == successor_function_name:
+            print(f"DEBUG successor_instance looked: {successor_instances[0]}")
+            name_prefix = successor_instances[0].split(":", maxsplit=1)[0]
+            if name_prefix == successor_function_name or name_prefix.endswith(f"-{successor_function_name}"):
                 return successor_instances[0]
             raise RuntimeError(
                 f"Could not find successor instance for successor function name {successor_function_name} in {successor_instances}"  # pylint: disable=line-too-long
@@ -575,7 +580,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # If there are multiple successor instances, return the first one that matches the successor function
         # name and has the correct index
         for successor_instance in successor_instances:
-            if successor_instance.split(":", maxsplit=1)[0] == successor_function_name:
+            print(f"DEBUG successor_instance looked: {successor_instance}")
+            name_prefix = successor_instance.split(":", maxsplit=1)[0]
+            if name_prefix == successor_function_name or name_prefix.endswith(f"-{successor_function_name}"):
                 if successor_instance.split(":", maxsplit=2)[1] == "sync":
                     return successor_instance
                 if successor_instance.split(":", maxsplit=2)[1].split("_")[-1] == str(
@@ -1231,6 +1238,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
     ) -> tuple[dict[str, Any], float]:
         # Retrieve the argument and check if it is a dictionary.
         # (Currently only support dictionary arguments)
+        print(f"DEBUG: Received raw event for processing: {args[0]}")
         argument_raw = args[0]
         if not isinstance(argument_raw, dict):
             raise RuntimeError(
@@ -1262,11 +1270,12 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             base64_data = argument_raw["data"]
             decoded_data = base64.b64decode(base64_data)
             json_string = decompress_json_str(decoded_data)
+            print(f"DEBUG: Decoded JSON string for processing: {json_string}")
             decoded_json = json.loads(json_string)
-            if "payload" not in decoded_json:
-                caribou_wrapper_argument = {"payload": decoded_json}
-            else:
+            if "payload" in decoded_json or "workflow_placement_decision" in decoded_json:
                 caribou_wrapper_argument = decoded_json
+            else:
+                caribou_wrapper_argument = {"payload": decoded_json}
         else:
             # For non-SNS invocations, the argument is already a dictionary
             # the argument is simply the event (argument_raw).
