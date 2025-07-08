@@ -21,11 +21,12 @@ from google.cloud import (  # scheduler_v1,
     resourcemanager_v3,
     run_v2,
     storage,
+    monitoring_v3
 )
 from google.cloud.iam_admin_v1 import IAMClient
 from google.iam.v1 import policy_pb2
 from google.oauth2 import service_account
-from google.protobuf import field_mask_pb2
+from google.protobuf import field_mask_pb2, timestamp_pb2
 from google.pubsub_v1 import PushConfig
 
 from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
@@ -35,7 +36,7 @@ from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     GLOBAL_GCP_SYSTEM_REGION,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
-    SYNC_TABLE_TTL,
+    SYNC_TABLE_TTL, BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str
@@ -86,6 +87,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._iam_admin_client = IAMClient(credentials=self._credentials)
         self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
         self._logging_client = logging_v2.Client(credentials=self._credentials)
+        self._monitoring_client = monitoring_v3.MetricServiceClient(credentials=self._credentials)
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
@@ -958,26 +960,34 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         else:
             time_end = None
 
-        resource_filter = 'resource.type="cloud_run_revision" ' f'resource.labels.service_name="{service_name}"'
-
-        if insights:
-            resource_filter = (
-                'resource.type="cloud_run_revision" '
-                'jsonPayload.@type="type.googleapis.com/google.cloud.run.v1.Revision"'
-            )
+        resource_filter = f'resource.labels.service_name="{service_name}"'
 
         query = (
-            f"{resource_filter} " f'timestamp>="{time_start}" '
-            if start
-            else "" f'timestamp<="{time_end}"'
-            if end
-            else ""
+            f'resource.type="cloud_run_revision" {resource_filter} AND '
+            f'(logName = "projects/{self._project_id}/logs/run.googleapis.com%2Frequests" '
+            f'OR jsonPayload.severity = "CARIBOU")'
         )
+
+        if time_start:
+            query += f' AND timestamp>="{time_start}"'
+
+        print(time_start)
+
+        if time_end:
+            query += f' AND timestamp<="{time_end}"'
+
+        print(f"Executing log query for {service_name}: {query}")
 
         client = self._logging_client
         entries = client.list_entries(filter_=query, order_by=logging_v2.DESCENDING)
 
-        return [entry.payload.get("message", str(entry.payload)) for entry in entries]
+        # print("entries:", entries)
+        result = []
+        for entry in entries:
+            json_result = json.dumps(entry.to_api_repr())
+            result.append(json_result)
+
+        return result
 
     def get_logs_since(self, function_instance: str, since: datetime) -> list[str]:
         return self._log_filter(function_instance, start=since)
@@ -987,6 +997,65 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
         return self._log_filter(function_instance, start=start, end=end, insights=True)
+
+    def query_metric(
+            self,
+            revision_name: str,
+            instance_id: str,
+            metric_type: str,
+            start: datetime,
+            end: datetime,
+            aligner: str | None = None,
+    ) -> float | None:
+        project_name = f"projects/{self._project_id}"
+
+        filter_string = (
+            f'metric.type="{metric_type}" AND'
+            f'resource.labels.revision_name="{revision_name}" AND'
+            f'resource.labels.instance_id="{instance_id}"'
+        )
+
+        start_timestamp = timestamp_pb2.Timestamp.FromDatetime(
+            start - timedelta(minutes = BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD)
+        )
+        end_timestamp = timestamp_pb2.Timestamp.FromDatetime(
+            end + timedelta(minutes = BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD)
+        )
+
+        interval = monitoring_v3.types.TimeInterval(
+            start_time = start_timestamp,
+            end_time = end_timestamp
+        )
+
+        request: dict[str, Any] = {
+            "name": project_name,
+            "filter": filter_string,
+            "interval": interval,
+            "view": monitoring_v3.types.ListTimeSeriesRequest.TimeSeriesView.FULL,
+        }
+
+        if aligner:
+            align = monitoring_v3.types.Aggregation.Aligner.ALIGN_NONE
+            if aligner == "ALIGN_MAX":
+                align = monitoring_v3.types.Aggregation.Aligner.ALIGN_MAX
+
+            request["aggregation"] = monitoring_v3.types.Aggregation(
+                alignment_period = {"seconds": 60},
+                per_series_aligner = align, # type: ignore
+            )
+
+        try:
+            result = self._monitoring_client.list_time_series(
+                request=request
+            )
+
+            for series in result:
+                if series.points:
+                    return series.points[0].value.double_value
+        except google_api_exceptions.GoogleAPICallError as e:
+            logger.warning(f"Failed to query metric '{metric_type}': {e}")
+
+        return None
 
     def remove_messaging_topic(self, topic_identifier: str) -> None:
         publisher_client = self._pubsub_publisher_client
@@ -1199,7 +1268,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     #     print("unfinished")
 
 
-# if __name__ == "__main__":
-#     gcp_remote_client = GCPRemoteClient()
-#
-#     (print(gcp_remote_client._get_region_abbreviation("east1")))
+if __name__ == "__main__":
+    gcp_remote_client = GCPRemoteClient()
+    start_time = datetime.now() - timedelta(hours=6)
+    end_time = datetime.now()
+    function_instance = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722"
+    logs = gcp_remote_client.get_logs_between(function_instance, start_time, end_time)
+    print("done:")
+
+    for log in logs:
+        # GCP: caribou logs have a jsonpayload.severity="CARIBOU".
+        # GCP report logs have a logName of "run.googleapis.com%2Frequests"
+        gcp_log = json.loads(log)
+        if (gcp_log.get("jsonPayload", {}).get("severity", "") == "CARIBOU"
+                or "run.googleapis.com%2Frequests" in gcp_log.get("logName", "")):
+            print("log:", gcp_log)
+        else:
+            print("no:", gcp_log)

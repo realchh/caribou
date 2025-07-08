@@ -12,7 +12,7 @@ from pydub import AudioSegment
 from tempfile import TemporaryDirectory
 
 # Change the following bucket name and region to match your setup
-gcs_bucket_name = "caribou-text-2-speech-censoring-naufal"
+gcp_bucket_name = "caribou-text-2-speech-censoring-naufal"
 # polly_region_name = "us-east-1" # Note AWS Polly is not available in all regions
 
 workflow = CaribouWorkflow(name="text_2_speech_censoring", version="0.0.1")
@@ -58,7 +58,7 @@ def profanity(event: dict[str, Any]) -> dict[str, Any]:
     with TemporaryDirectory() as tmp_dir:
         local_name = f"{tmp_dir}/input.txt"
 
-        bucket = client.bucket(gcs_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(input_file)
         blob.download_to_filename(local_name)
 
@@ -99,7 +99,7 @@ def text_2_speech(event: dict[str, Any]) -> dict[str, Any]:
     with TemporaryDirectory() as tmp_dir:
         local_name = f"{tmp_dir}/input.txt"
 
-        bucket = client.bucket(gcs_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(input_file)
         blob.download_to_filename(local_name)
 
@@ -186,7 +186,7 @@ def encoding(event: dict[str, Any]) -> dict[str, Any]:
     with TemporaryDirectory() as tmp_dir:
         local_name = f"{tmp_dir}/input.txt"
 
-        bucket = client.bucket(gcs_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(file_name)
         blob.download_to_filename(local_name)
 
@@ -236,7 +236,7 @@ def censor(event: dict[str, Any]) -> dict[str, Any]:
     client = storage.Client()
     with TemporaryDirectory() as tmp_dir:
         local_index_name = f"{tmp_dir}/indexes.json"
-        bucket = client.bucket(gcs_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(index_file)
         blob.download_to_filename(local_index_name)
 

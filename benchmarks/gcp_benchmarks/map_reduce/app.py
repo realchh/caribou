@@ -11,7 +11,7 @@ import math
 from caribou.deployment.client import CaribouWorkflow
 
 # Change the following bucket name and region to match your setup
-gcs_bucket_name = "caribou-map-reduce"
+gcp_bucket_name = "caribou-map-reduce"
 
 workflow = CaribouWorkflow(name="map_reduce", version="0.0.1")
 
@@ -101,7 +101,7 @@ def mapper(event: dict[str, Any]) -> dict[str, Any]:
         for chunk_index in range(start_index, end_index):
             chunk_file_path = f"input/{input_base_dir}/chunk_{chunk_index}.txt"
 
-            bucket = client.bucket(gcs_bucket_name)
+            bucket = client.bucket(gcp_bucket_name)
             blob = bucket.blob(chunk_file_path)
             blob.download_to_filename(local_file_path)
 
@@ -189,7 +189,7 @@ def reducer(event: dict[str, Any]) -> dict[str, Any]:
     with TemporaryDirectory() as tmp_dir:
         if word_count_file_path_1 is not None:
             local_file_path1 = f"{tmp_dir}/word_count1.json"
-            bucket = client.bucket(gcs_bucket_name)
+            bucket = client.bucket(gcp_bucket_name)
             blob = bucket.blob(word_count_file_path_1)
             blob.download_to_filename(local_file_path1)
             with open(local_file_path1, "r") as file:
@@ -202,7 +202,7 @@ def reducer(event: dict[str, Any]) -> dict[str, Any]:
 
         if word_count_file_path_2 is not None:
             local_file_path2 = f"{tmp_dir}/word_count2.json"
-            bucket = client.bucket(gcs_bucket_name)
+            bucket = client.bucket(gcp_bucket_name)
             blob = bucket.blob(word_count_file_path_2)
             blob.download_to_filename(local_file_path2)
             with open(local_file_path2, "r") as file:
@@ -250,7 +250,7 @@ def output_processor(event: dict[str, Any]) -> dict[str, Any]:
 
         for result in results:
             local_file_path = f"{tmp_dir}/sorted_word_count.json"
-            bucket = client.bucket(gcs_bucket_name)
+            bucket = client.bucket(gcp_bucket_name)
             blob = bucket.blob(result["sorted_word_count_file_path"])
             blob.download_to_filename(local_file_path)
             with open(local_file_path, "r") as file:

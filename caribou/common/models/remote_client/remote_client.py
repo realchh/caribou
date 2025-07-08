@@ -241,3 +241,15 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def remove_resource(self, key: str) -> None:
         raise NotImplementedError()
+
+    @abstractmethod
+    def query_metric(
+            self,
+            revision_name: str,
+            instance_id: str,
+            metric_type: str,
+            start: datetime,
+            end: datetime,
+            aligner: str | None = None
+    ) -> float | None:
+        raise NotImplementedError()

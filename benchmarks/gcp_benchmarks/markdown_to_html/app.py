@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from caribou.deployment.client import CaribouWorkflow
 from google.cloud import storage
 
-gcs_bucket_name = "caribou-markdown-to-html"
+gcp_bucket_name = "caribou-markdown-to-html"
 
 workflow = CaribouWorkflow(name="markdown_to_html", version="0.0.1")
 
@@ -27,7 +27,7 @@ def markdown_to_html(event: dict[str, Any]) -> dict[str, Any]:
     client = storage.Client()
     
     with TemporaryDirectory() as tmp_dir:
-        bucket = client.bucket(gcs_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(filename)
         blob.download_to_filename(f"{tmp_dir}/{filename}")
 

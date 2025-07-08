@@ -19,7 +19,7 @@ from google.cloud import storage
 MAX_FANOUT_NUM = 6
 
 # Change the following bucket name and region to match your setup
-cloud_storage_bucket_name = "caribou-video-analytics-naufal"
+gcp_bucket_name = "caribou-video-analytics-naufal"
 
 workflow = CaribouWorkflow(name="video_analytics", version="0.0.2")
 
@@ -83,7 +83,7 @@ def decode(event: dict[str, Any]) -> dict[str, Any]:
         client = storage.Client()
 
         # Download the video file from GCS
-        bucket = client.bucket(cloud_storage_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(streaming_filepath)
         blob.download_to_filename(local_streaming_filepath)
 
@@ -150,7 +150,7 @@ def recognition(event: dict[str, Any]) -> dict[str, Any]:
 
         # Download the zip file of image shards from S3
         client = storage.Client()
-        bucket = client.bucket(cloud_storage_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(decoded_filepath)
         blob.download_to_filename(local_decode_filepath)
         
@@ -216,7 +216,7 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
 
         # Load model labels
         client = storage.Client()
-        bucket = client.bucket(cloud_storage_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob("imagenet_labels.txt")
         image_net_labels = blob.download_as_text().splitlines()
 
@@ -285,7 +285,7 @@ def video_analytics_streaming(video_name: str, output_folder_name: str) -> str:
 
         # Download the file from S3
         client = storage.Client()
-        bucket = client.bucket(cloud_storage_bucket_name)
+        bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(remote_filepath)
         blob.download_to_filename(local_filepath)
 
@@ -362,7 +362,7 @@ def video_analytics_decode(tmp_dir: str, local_streaming_filepath: str, output_f
     # Upload the zip file to S3
     remote_decoded_zip_filepath = f"output/{output_folder_name}/intermediate_files/{zip_filename}"
     client = storage.Client()
-    bucket = client.bucket(cloud_storage_bucket_name)
+    bucket = client.bucket(gcp_bucket_name)
     blob = bucket.blob(remote_decoded_zip_filepath)
     blob.upload_from_filename(local_zip_filepath)
 

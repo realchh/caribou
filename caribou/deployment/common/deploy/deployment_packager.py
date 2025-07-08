@@ -112,6 +112,8 @@ class DeploymentPackager:
                     file.write("\ngoogle-cloud-resource-manager\n")
                 if "google-cloud-run" not in requirements:
                     file.write("\ngoogle-cloud-run\n")
+                if "google-cloud-monitoring" not in requirements:
+                    file.write("\ngoogle-cloud-monitoring\n")
                 if "types-protobuf" not in requirements:
                     file.write("\ntypes-protobuf\n")
                 if "functions-framework" not in requirements:
@@ -344,6 +346,8 @@ class DeploymentPackager:
                 requirements.append("google-cloud-resource-manager")
             if "google-cloud-run" not in requirements:
                 requirements.append("google-cloud-run")
+            if "google-cloud-monitoring" not in requirements:
+                requirements.append("google-cloud-monitoring")
             if "types-protobuf" not in requirements:
                 requirements.append("types-protobuf")
             if "functions-framework" not in requirements:
