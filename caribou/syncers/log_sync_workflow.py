@@ -18,7 +18,7 @@ from caribou.common.constants import (
     SYNC_UPLOAD_ONLY_TASK_TYPE,
     TIME_FORMAT,
     TIME_FORMAT_DAYS,
-    WORKFLOW_SUMMARY_TABLE,
+    WORKFLOW_SUMMARY_TABLE, BUFFER_GCP_METRICS_GRACE_PERIOD,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
@@ -120,8 +120,9 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 # GCP: caribou logs have a jsonpayload.severity="CARIBOU".
                 # GCP report logs have a logName of "run.googleapis.com%2Frequests"
                 gcp_log = json.loads(log)
-                if (gcp_log.get("jsonPayload", {}).get("severity", "") == "CARIBOU"
-                        or "run.googleapis.com%2Frequests" in gcp_log.get("logName", "")):
+                if gcp_log.get("jsonPayload", {}).get(
+                    "severity", ""
+                ) == "CARIBOU" or "run.googleapis.com%2Frequests" in gcp_log.get("logName", ""):
                     self._process_log_entry(log, provider_region, time_to)
 
         else:
@@ -139,7 +140,6 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 if log.startswith("[CARIBOU]") or log.startswith("REPORT RequestId:"):
                     self._process_log_entry(log, provider_region, time_to)
 
-
     def _setup_gcp_insights(self, logs: list[str], remote_client: RemoteClient) -> None:
         # clear the insight logs
         self._insights_logs = {}
@@ -151,9 +151,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             log_name = log_dict.get("logName", None)
 
             # filter for main request log
-            if not log_name:
-                continue
-            elif "run.googleapis.com%2Frequests" not in log_name:
+            if not log_name or "run.googleapis.com%2Frequests" not in log_name:
                 continue
 
             # filter for field with "trace" as it contains the run ID
@@ -161,7 +159,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             if not trace:
                 continue
 
-            request_id = trace.split('/')[-1]
+            request_id = trace.split("/")[-1]
 
             if request_id not in self._insights_logs:
                 self._insights_logs[request_id] = {}
@@ -175,7 +173,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
 
             if payload:
                 latency_str = payload.get("latency", "0s")
-                latency = float(latency_str.rstrip('s'))
+                latency = float(latency_str.rstrip("s"))
                 self._insights_logs[request_id]["duration"] = latency
 
                 rx_bytes_str = payload.get("requestSize", "0")
@@ -189,48 +187,53 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 total_network = rx_bytes + tx_bytes
                 self._insights_logs[request_id]["total_network"] = total_network
 
-                if payload.get("startupLatency"):
-                    startup_latency_str = payload.get("startupLatency", "0s")
-                    # A non-zero startup latency indicates a cold start
-                    self._insights_logs[request_id]["cold_start"] = float(startup_latency_str.rstrip('s')) > 0
-                    self._insights_logs[request_id]["init_duration_s"] = float(startup_latency_str.rstrip('s'))
+                startup_latency_str = payload.get("startupLatency", "0s")
+                # A non-zero startup latency indicates a cold start
+                self._insights_logs[request_id]["cold_start"] = float(startup_latency_str.rstrip("s")) > 0
+                self._insights_logs[request_id]["init_duration_s"] = float(startup_latency_str.rstrip("s"))
 
             resource_labels = log_dict.get("resource", {}).get("labels", {})
 
             revision_name = resource_labels.get("revision_name", None)
-            instance_id = resource_labels.get("instance_id", None)
             timestamp = log_dict.get("timestamp", None)
 
-            if revision_name and instance_id and timestamp:
-                end_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if revision_name and timestamp:
+                end_time = (datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                            + timedelta(minutes=BUFFER_GCP_METRICS_GRACE_PERIOD))
                 start_time = end_time - timedelta(seconds=latency)
 
                 # Fetch CPU Usage Time
                 cpu_total_time = remote_client.query_metric(
-                    revision_name, instance_id,
-                    "run.googleapis.com/container/cpu/allocation_time",
-                    start_time, end_time
+                    revision_name,
+                    "run.googleapis.com/container/cpu/usage",
+                    start_time,
+                    end_time,
+                    "ALIGN_PERCENTILE_99"
                 )
-                self._insights_logs[request_id]["cpu_total_time"] = cpu_total_time
+                self._insights_logs[request_id]["cpu_total_time"] = cpu_total_time * 1000 # to ms
 
                 # Fetch Memory Utilization
                 memory_utilization = remote_client.query_metric(
-                    revision_name, instance_id,
+                    revision_name,
                     "run.googleapis.com/container/memory/utilizations",
-                    start_time, end_time
+                    start_time,
+                    end_time,
+                    "ALIGN_PERCENTILE_99"
                 )
-                self._insights_logs[request_id]["memory_utilization"] = memory_utilization
+                self._insights_logs[request_id]["memory_utilization"] = memory_utilization * 100 # to percents
 
                 # Fetch Max Memory Usage
                 used_memory_max = remote_client.query_metric(
-                    revision_name, instance_id,
+                    revision_name,
                     "run.googleapis.com/container/memory/usage",
-                    start_time, end_time, "ALIGN_MAX"
+                    start_time,
+                    end_time,
+                    "ALIGN_PERCENTILE_99",
                 )
-                self._insights_logs[request_id]["used_memory_max"] = used_memory_max
+                self._insights_logs[request_id]["used_memory_max"] = used_memory_max / (1024**2) # to MBs
 
                 total_memory = used_memory_max / memory_utilization
-                self._insights_logs[request_id]["total_memory"] = total_memory
+                self._insights_logs[request_id]["total_memory"] = total_memory / (1024**2) # to MBs
 
     def _setup_lambda_insights(self, logs: list[str]) -> None:
         # Clear the lambda insights logs
@@ -276,7 +279,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 if not trace:
                     return
 
-                request_id = trace.split('/')[-1]
+                request_id = trace.split("/")[-1]
                 if request_id in self._encountered_completed_request_ids:
                     self._encountered_duplicate_completed_request_ids.add(request_id)
 
@@ -284,7 +287,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 return
 
             payload = log_dict.get("jsonPayload", {})
-            if payload.get("severity") != "CARIBOU" or payload == {}:
+            if payload == {} or payload.get("severity") != "CARIBOU":
                 return
 
             log_entry = payload.get("message", None)
@@ -352,9 +355,9 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         workflow_run_sample.update_log_end_time(log_time_dt)
 
         # Extract the request_id from the log entry
-        if provider == Provider.GCP.value:
+        if provider == Provider.GCP.value and log_dict:
             trace = log_dict.get("trace")
-            request_id = trace.split('/')[-1]
+            request_id = trace.split("/")[-1]
         else:
             parts = log_entry.split("\t")
             request_id = parts[2]

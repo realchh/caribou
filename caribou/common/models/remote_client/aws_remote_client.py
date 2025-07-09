@@ -1200,3 +1200,13 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         lambda_client.invoke(
             FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
         )
+
+    def query_metric(
+        self,
+        revision_name: str,
+        metric_type: str,
+        start: datetime,
+        end: datetime,
+        aligner: str | None = None,
+    ) -> float | None:
+        raise NotImplementedError

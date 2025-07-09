@@ -17,11 +17,11 @@ from google.cloud import (  # scheduler_v1,
     firestore,
     firestore_admin_v1,
     logging_v2,
+    monitoring_v3,
     pubsub_v1,
     resourcemanager_v3,
     run_v2,
     storage,
-    monitoring_v3
 )
 from google.cloud.iam_admin_v1 import IAMClient
 from google.iam.v1 import policy_pb2
@@ -30,13 +30,14 @@ from google.protobuf import field_mask_pb2, timestamp_pb2
 from google.pubsub_v1 import PushConfig
 
 from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
+    BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD,
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
     FIRESTORE_TTL_FIELD_NAME,
     GLOBAL_GCP_SYSTEM_REGION,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
-    SYNC_TABLE_TTL, BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD,
+    SYNC_TABLE_TTL,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import compress_json_str, decompress_json_str
@@ -947,9 +948,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Could not delete resource {key} from database: {e}") from e
 
-    def _log_filter(
-        self, service_name: str, start: datetime | None = None, end: datetime | None = None, *, insights: bool = False
-    ) -> list[str]:
+    def _log_filter(self, service_name: str, start: datetime | None = None, end: datetime | None = None) -> list[str]:
         if start:
             time_start = start.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         else:
@@ -996,36 +995,31 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return self._log_filter(function_instance, start=start, end=end)
 
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
-        return self._log_filter(function_instance, start=start, end=end, insights=True)
+        return self._log_filter(function_instance, start=start, end=end)
 
     def query_metric(
-            self,
-            revision_name: str,
-            instance_id: str,
-            metric_type: str,
-            start: datetime,
-            end: datetime,
-            aligner: str | None = None,
+        self,
+        revision_name: str,
+        metric_type: str,
+        start: datetime,
+        end: datetime,
+        aligner: str | None = None,
     ) -> float | None:
         project_name = f"projects/{self._project_id}"
 
         filter_string = (
-            f'metric.type="{metric_type}" AND'
-            f'resource.labels.revision_name="{revision_name}" AND'
-            f'resource.labels.instance_id="{instance_id}"'
+            f'metric.type="{metric_type}" AND '
+            f'resource.labels.revision_name="{revision_name}"'
         )
 
-        start_timestamp = timestamp_pb2.Timestamp.FromDatetime(
-            start - timedelta(minutes = BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD)
-        )
-        end_timestamp = timestamp_pb2.Timestamp.FromDatetime(
-            end + timedelta(minutes = BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD)
-        )
+        print(f"Executing metric query: {filter_string}")
 
-        interval = monitoring_v3.types.TimeInterval(
-            start_time = start_timestamp,
-            end_time = end_timestamp
-        )
+        start_timestamp = timestamp_pb2.Timestamp()
+        start_timestamp.FromDatetime(dt = start)
+        end_timestamp = timestamp_pb2.Timestamp()
+        end_timestamp.FromDatetime(dt = end)
+
+        interval = monitoring_v3.types.TimeInterval(start_time=start_timestamp, end_time=end_timestamp)
 
         request: dict[str, Any] = {
             "name": project_name,
@@ -1038,20 +1032,37 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             align = monitoring_v3.types.Aggregation.Aligner.ALIGN_NONE
             if aligner == "ALIGN_MAX":
                 align = monitoring_v3.types.Aggregation.Aligner.ALIGN_MAX
+            elif aligner == "ALIGN_SUM":
+                align = monitoring_v3.types.Aggregation.Aligner.ALIGN_SUM
+            elif aligner == "ALIGN_PERCENTILE_99":
+                align = monitoring_v3.types.Aggregation.Aligner.ALIGN_PERCENTILE_99
 
             request["aggregation"] = monitoring_v3.types.Aggregation(
-                alignment_period = {"seconds": 60},
-                per_series_aligner = align, # type: ignore
+                alignment_period={"seconds": 30},
+                per_series_aligner=align,  # type: ignore
             )
 
         try:
-            result = self._monitoring_client.list_time_series(
-                request=request
-            )
-
+            result = self._monitoring_client.list_time_series(request=request)
+            # print(f"result: {result}")
             for series in result:
-                if series.points:
-                    return series.points[0].value.double_value
+                if not series.points:
+                    return None
+
+                i = 0
+                max = 0.0
+                for point in series.points:
+                    print(f"point[{i}]: point: {point}")
+                    value = point.value.double_value
+                    if value >= max:
+                        max = value
+                    i += 1
+                    # if value != 0.0:
+                    #     return value
+
+                print(f"max = {max}")
+                return max
+
         except google_api_exceptions.GoogleAPICallError as e:
             logger.warning(f"Failed to query metric '{metric_type}': {e}")
 
@@ -1270,18 +1281,26 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
 if __name__ == "__main__":
     gcp_remote_client = GCPRemoteClient()
-    start_time = datetime.now() - timedelta(hours=6)
-    end_time = datetime.now()
+    start_time = datetime.fromisoformat("2025-07-08T15:19:00-07:00")
+    end_time = datetime.fromisoformat("2025-07-08T15:19:50-07:00")
     function_instance = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722"
-    logs = gcp_remote_client.get_logs_between(function_instance, start_time, end_time)
-    print("done:")
+    # logs = gcp_remote_client.get_logs_between(function_instance, start_time, end_time)
+    # print("done:")
 
-    for log in logs:
-        # GCP: caribou logs have a jsonpayload.severity="CARIBOU".
-        # GCP report logs have a logName of "run.googleapis.com%2Frequests"
-        gcp_log = json.loads(log)
-        if (gcp_log.get("jsonPayload", {}).get("severity", "") == "CARIBOU"
-                or "run.googleapis.com%2Frequests" in gcp_log.get("logName", "")):
-            print("log:", gcp_log)
-        else:
-            print("no:", gcp_log)
+    # for log in logs:
+    #     # GCP: caribou logs have a jsonpayload.severity="CARIBOU".
+    #     # GCP report logs have a logName of "run.googleapis.com%2Frequests"
+    #     gcp_log = json.loads(log)
+    #     if gcp_log.get("jsonPayload", {}).get(
+    #         "severity", ""
+    #     ) == "CARIBOU" or "run.googleapis.com%2Frequests" in gcp_log.get("logName", ""):
+    #         print("log:", gcp_log)
+    #     else:
+    #         print("no:", gcp_log)
+    revision_name = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722-00001-b77"
+    instance_id = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722-00001"
+    memory_utilization = gcp_remote_client.query_metric(
+        revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
+    )
+
+    print(f"Memory utilization: {memory_utilization}")

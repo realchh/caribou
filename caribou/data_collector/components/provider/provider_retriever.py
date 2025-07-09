@@ -50,6 +50,8 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             name = "Columbus, Ohio"  # Somehow Google Maps doesn't know where Columbus, OH is
         if name == "Canada (Central)":
             name = "Varennes, QC"
+        if name == "Malaysia":
+            name = "Kuala Lumpur, Malaysia"
         geocode_result = google_maps.geocode(name)
         if geocode_result:
             latitude = geocode_result[0]["geometry"]["location"]["lat"]
@@ -238,6 +240,8 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         ecr_cost_dict = self._retrieve_aws_ecr_cost(aws_regions)
 
+        pue_dict = self._retrieve_aws_pue(aws_regions)
+
         # data obtained from https://www.cloudcarbonfootprint.org/docs/methodology/#gcp-1
         return {
             region_key: {
@@ -246,7 +250,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 "sns_cost": sns_cost_dict[region_key],
                 "dynamodb_cost": dynamodb_cost_dict[region_key],
                 "ecr_cost": ecr_cost_dict[region_key],
-                "pue": 1.135,
+                "pue": pue_dict[region_key],
                 "cfe": 0.0,
                 "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.0035,
@@ -262,6 +266,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         pubsub_cost_dict = self._retrieve_gcp_pubsub_cost(gcp_regions)
         dynamodb_cost_dict = self._retrieve_gcp_firestore_cost(gcp_regions)
         ecr_cost_dict = self._retrieve_gcp_artifact_registry_cost(gcp_regions)
+        pue_dict = self._retrieve_gcp_pue(gcp_regions)
 
         return {
             region_key: {
@@ -270,7 +275,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 "sns_cost": pubsub_cost_dict[region_key],
                 "dynamodb_cost": dynamodb_cost_dict[region_key],
                 "ecr_cost": ecr_cost_dict[region_key],
-                "pue": 1.1,
+                "pue": pue_dict[region_key],
                 "cfe": 0.0,
                 "average_memory_power": 0.000392,
                 "max_cpu_power_kWh": 0.00426,
@@ -487,6 +492,102 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             }
 
         return result_sns_cost_dict
+
+    # data from https://sustainability.aboutamazon.com/products-services/aws-cloud
+    def _retrieve_aws_pue(self, available_regions: list[str]) -> dict[str, float]:
+        exact_region_codes = {
+            "us-east-1": 1.15,
+            "us-east-2": 1.13,
+            "us-west-1": 1.18,
+            "us-west-2": 1.12,
+            "ca-central-1": 1.19,
+            "ca-west-1": 1.17,
+            "mx-central-1": 1.14,
+            "eu-west-1": 1.11,
+            "eu-central-1": 1.35,
+            "eu-north-1": 1.10,
+            "ap-southeast-1": 1.32,
+            "ap-southeast-2": 1.16,
+            "ap-southeast-3": 1.40,
+            "ap-southeast-4": 1.07,
+            "ap-northeast-1": 1.27,
+            "ap-south-1": 1.42,
+            "ap-south-2": 1.46,
+            "sa-east-1": 1.17,
+            "af-south-1": 1.24,
+            "me-south-1": 1.31,
+            "me-central-1": 1.27,
+            "il-central-1": 1.31,
+        }
+        result_pue_dict = {}
+
+
+        for region_key in available_regions:
+            if ":" not in region_key:
+                raise ValueError(f"Invalid region key {region_key}")
+
+            region_code = region_key.split(":")[1]
+
+            # Check if the region code is in the dictionary
+            if region_code in exact_region_codes:
+                pue = exact_region_codes[region_code]
+            elif region_code.startswith("us-"):
+                pue = 1.14
+            elif region_code.startswith("eu-"):
+                pue = 1.11
+            elif region_code.startswith("ap-"):
+                pue = 1.27
+            elif region_code.startswith("ca-"):
+                pue = 1.14
+            elif region_code.startswith("sa-"):
+                pue = 1.17
+            elif region_code.startswith("af-"):
+                pue = 1.24
+            elif region_code.startswith("me-"):
+                pue = 1.31
+            elif region_code.startswith("mx-"):
+                pue = 1.14
+            else:
+                pue = 1.15
+
+            result_pue_dict[region_key] = pue
+
+        return result_pue_dict
+
+    # data from https://datacenters.google/efficiency/#2025. we are using the TTM PUE here for simplicity
+    def _retrieve_gcp_pue(self, available_regions: list[str]) -> dict[str, float]:
+        exact_region_codes = {
+            "us-east1": 1.1,
+            "us-east4": 1.08,
+            "us-east5": 1.05,
+            "us-central1": 1.07,
+            "us-south1": 1.1,
+            "us-west1": 1.07,
+            "us-west4": 1.09,
+            "europe-west1": 1.08,
+            "europe-west4": 1.08,
+            "europe-north1": 1.1,
+            "asia-southeast1": 1.13,
+            "asia-east1": 1.12,
+        }
+        result_pue_dict = {}
+
+
+        for region_key in available_regions:
+            if ":" not in region_key:
+                raise ValueError(f"Invalid region key {region_key}")
+
+            region_code = region_key.split(":")[1]
+
+            # Check if the region code is in the dictionary
+            if region_code in exact_region_codes:
+                pue = exact_region_codes[region_code]
+            else:
+                pue = 1.09
+
+            result_pue_dict[region_key] = pue
+
+        return result_pue_dict
 
     def _retrieve_aws_dynamodb_cost(self, available_region: list[str]) -> dict[str, Any]:
         dynamodb_cost_response = self._aws_pricing_client.list_price_lists(

@@ -70,18 +70,42 @@ WORKFLOW_SUMMARY_TABLE = "workflow_summary_table"
 SOLVER_INPUT_GRID_CARBON_DEFAULT = 410
 
 ## Datacenter Loader
-SOLVER_INPUT_AVERAGE_MEMORY_POWER_DEFAULT = 0.0003725
-SOLVER_INPUT_PUE_DEFAULT = 1.11
+# value from https://www.cloudcarbonfootprint.org/docs/methodology/#aws-1
+SOLVER_INPUT_AVERAGE_MEMORY_POWER_DEFAULT = 0.000392
+# update from AWS: https://sustainability.aboutamazon.com/products-services/aws-cloud Global AWS PUE = 1.15
+SOLVER_INPUT_PUE_DEFAULT = 1.15
+# GCP: https://datacenters.google/efficiency/ Global GCP TTM PUE = 1.09
+SOLVER_INPUT_GCP_PUE_DEFAULT = 1.09
 SOLVER_INPUT_CFE_DEFAULT = 0.0
-SOLVER_INPUT_COMPUTE_COST_DEFAULT = 1.66667e-05  # of x86_64 architecture Ohio region
-SOLVER_INPUT_INVOCATION_COST_DEFAULT = 2e-07  # of x86_64 architecture Ohio region
-SOLVER_INPUT_TRANSMISSION_COST_DEFAULT = 0.09  # Global data transfer cost
+
+SOLVER_INPUT_COMPUTE_COST_DEFAULT = 1.66667e-05  # of AWS x86_64 architecture Ohio region
+SOLVER_INPUT_GCP_COMPUTE_COST_DEFAULT = 1.8e-05  # of GCP Tier 1 regions
+
+SOLVER_INPUT_INVOCATION_COST_DEFAULT = 2e-07  # of AWS x86_64 architecture Ohio region
+SOLVER_INPUT_GCP_INVOCATION_COST_DEFAULT = 0.0  # of GCP Tier 1 regions
+
+SOLVER_INPUT_TRANSMISSION_COST_DEFAULT = 0.09  # Global AWS data transfer cost
+SOLVER_INPUT_GCP_TRANSMISSION_COST_DEFAULT = 0.09  # Global GCP data transfer cost
+
+# value from https://www.cloudcarbonfootprint.org/docs/methodology/#aws-1
 SOLVER_INPUT_MIN_CPU_POWER_DEFAULT = 0.00074
 SOLVER_INPUT_MAX_CPU_POWER_DEFAULT = 0.0035
+
+# value from https://www.cloudcarbonfootprint.org/docs/methodology/#gcp-1
+SOLVER_INPUT_GCP_MIN_CPU_POWER_DEFAULT = 0.00071
+SOLVER_INPUT_GCP_MAX_CPU_POWER_DEFAULT = 0.00426
+
 SOLVER_INPUT_SNS_REQUEST_COST_DEFAULT = 0.50 / 1000000  # 0.50 USD per 1 million requests (At Ohio region)
+SOLVER_INPUT_GCP_SNS_REQUEST_COST_DEFAULT = 50/(1024**3) # 50 USD per TB, minimum size = 1KB
+
 SOLVER_INPUT_DYNAMODB_READ_COST_DEFAULT = 0.25 / 1000000  # 0.25 USD per 1 million read request unit (At Ohio region)
 SOLVER_INPUT_DYNAMODB_WRITE_COST_DEFAULT = 1.25 / 1000000  # 1.25 USD per 1 million write request unit (At Ohio region)
+
+SOLVER_INPUT_GCP_DYNAMODB_READ_COST_DEFAULT = 0.03 / 100000  # 0.03 USD per 100,000 documents (At Iowa region)
+SOLVER_INPUT_GCP_DYNAMODB_WRITE_COST_DEFAULT = 0.03 / 100000  # 0.09 USD per 100,000 documents (At Iowa region)
+
 SOLVER_INPUT_ECR_MONTHLY_STORAGE_COST_DEFAULT = 0.10  # 0.10 USD per 1 GB per month (At Ohio region)
+SOLVER_INPUT_GCP_ECR_MONTHLY_STORAGE_COST_DEFAULT = 0.10  # 0.10 USD per 1 GB per month
 
 ## Performance Loader
 SOLVER_INPUT_RELATIVE_PERFORMANCE_DEFAULT = 1.0
@@ -144,6 +168,8 @@ MIN_TIME_BETWEEN_SYNC = 15  # In Minutes
 ## Used as lambda insights can be delayed
 BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD = 15  # In minutes
 
+BUFFER_GCP_METRICS_GRACE_PERIOD = 2  # In minutes
+
 ## Successor task types
 REDIRECT_ONLY_TASK_TYPE = "REDIRECT_ONLY"
 INVOKE_SUCCESSOR_ONLY_TASK_TYPE = "INVOKE_SUCCESSOR_ONLY"
@@ -157,6 +183,7 @@ MAX_WORKERS = 1
 
 ## Orchastration transfer size limitation
 MAX_TRANSFER_SIZE = 256000  # In bytes
+MAX_GCP_TRANSFER_SIZE = 10 * (1024**2) # 10 MB in bytes
 
 
 # Caribou Go Path

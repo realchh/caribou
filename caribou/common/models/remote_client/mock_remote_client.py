@@ -120,3 +120,13 @@ class MockRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
         pass
+
+    def query_metric(
+        self,
+        revision_name: str,
+        metric_type: str,
+        start: datetime,
+        end: datetime,
+        aligner: str | None = None,
+    ) -> float | None:
+        pass
