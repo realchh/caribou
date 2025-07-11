@@ -329,6 +329,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         image_uri: str
@@ -363,13 +364,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 self._store_deployed_image_uri(function_name, image_uri)
 
         print("role identifier: ", role_identifier)
+        if cpu is None:
+            cpu = max(1.0, memory_size // 1024)
 
-        print("creating cloud run service url for service: ", function_name)
+        print("creating cloud run service url for service: ", function_name, " cpu count:", cpu)
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
             env=environment_variables,
-            cpu=1.0,
+            cpu=cpu,
             memory_mib=memory_size,
             timeout_s=timeout,
             service_account_email=role_identifier,
@@ -1326,8 +1329,10 @@ if __name__ == "__main__":
     #         print("no:", gcp_log)
     revision_name = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722-00001-b77"
     instance_id = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722-00001"
-    memory_utilization = gcp_remote_client.query_metric(
-        revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
-    )
+    # memory_utilization = gcp_remote_client.query_metric(
+    #     revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
+    # )
+    service_object = gcp_remote_client.get_cloud_run_service_object("dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722")
+    print(service_object)
 
-    print(f"Memory utilization: {memory_utilization}")
+    # print(f"Memory utilization: {memory_utilization}")

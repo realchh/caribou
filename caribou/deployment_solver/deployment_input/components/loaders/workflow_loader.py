@@ -365,6 +365,9 @@ class WorkflowLoader(InputLoader):
                 # vcpu ratio (assuming linear, intercept at 0 scaling)
                 # for aws lambda https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html
                 vcpu = self.get_memory(instance_name, provider_name) / 1769
+            elif provider_name == Provider.GCP.value:
+                memory_size = self.get_memory(instance_name, provider_name)
+                vcpu =  max(1.0, memory_size // 1024)
             else:
                 raise ValueError(
                     f"vCPU count for instance {instance_name} in provider {provider_name} is not available"

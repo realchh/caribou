@@ -333,6 +333,7 @@ class IntegrationTestRemoteClient(RemoteClient):  # pylint: disable=too-many-pub
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         conn = self._db_connection()
