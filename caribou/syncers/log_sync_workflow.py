@@ -50,6 +50,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         self._deployed_regions: dict[str, dict[str, Any]] = {}
         self._load_information(deployment_manager_config_str)
         self._insights_logs: dict[str, Any] = {}
+        self._run_id_request_id_dict: dict[str, str] = {}
 
         self._existing_data: dict[str, Any] = {
             "execution_instance_region": {},
@@ -67,11 +68,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         self._encountered_duplicate_completed_request_ids: set[str] = set()
 
     def _load_information(self, deployment_manager_config_str: str) -> None:
+        print("loading information from deployment manager config... ")
         deployment_manager_config = json.loads(deployment_manager_config_str)
         deployed_regions_str = deployment_manager_config.get("deployed_regions", "{}")
         self._deployed_regions = json.loads(deployed_regions_str)
 
     def _get_remote_client(self, provider_region: dict[str, str]) -> RemoteClient:
+        print(f"getting remote client for provider region: {provider_region}")
         if (provider_region["provider"], provider_region["region"]) not in self._region_clients:
             self._region_clients[
                 (provider_region["provider"], provider_region["region"])
@@ -79,11 +82,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         return self._region_clients[(provider_region["provider"], provider_region["region"])]
 
     def sync_workflow(self) -> None:
+        print("syncing workflow...")
         self._sync_logs()
         data_for_upload: str = self._prepare_data_for_upload(self._previous_data)
         self._upload_data(data_for_upload)
 
     def _upload_data(self, data_for_upload: str) -> None:
+        print(f"uploading data {data_for_upload} for {self.workflow_id} to workflow summary table... ")
         self._workflow_summary_client.update_value_in_table(
             WORKFLOW_SUMMARY_TABLE,
             self.workflow_id,
@@ -92,10 +97,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         )
 
     def _sync_logs(self) -> None:
+        print("syncing logs...")
         for function_physical_instance, instance_information in self._deployed_regions.items():
             provider_region = instance_information["deploy_region"]
+            print(f"syncing logs for {function_physical_instance} in {provider_region}...")
 
             for time_from, time_to in self._time_intervals_to_sync:
+                print(f"syncing logs for {function_physical_instance} in {provider_region} for {time_from} to {time_to}...")
                 self._process_logs_for_instance_for_one_region(
                     function_physical_instance, provider_region, time_from, time_to
                 )
@@ -104,6 +112,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
     def _process_logs_for_instance_for_one_region(
         self, functions_instance: str, provider_region: dict[str, str], time_from: datetime, time_to: datetime
     ) -> None:
+        print(f"processing logs for {functions_instance} in {provider_region} for {time_from} to {time_to}...")
         remote_client = self._get_remote_client(provider_region)
         logs = remote_client.get_logs_between(functions_instance, time_from, time_to)
         if len(logs) == 0:
@@ -114,6 +123,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         # Lambda insight logs may not available at the same time as the lambda logs
         # so we need to fetch logs from a wider time range
         if provider == Provider.GCP.value:
+            print(f"setting up gcp insights for {functions_instance} in {provider_region} for {time_from} to {time_to}...")
             self._setup_gcp_insights(logs, remote_client)
 
             for log in logs:
@@ -123,9 +133,11 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 if gcp_log.get("jsonPayload", {}).get(
                     "severity", ""
                 ) == "CARIBOU" or "run.googleapis.com%2Frequests" in gcp_log.get("logName", ""):
+                    # print(f"processing gcp log {log}")
                     self._process_log_entry(log, provider_region, time_to)
 
         else:
+            print(f"setting up lambda insights for {functions_instance} in {provider_region} for {time_from} to {time_to}...")
             lambda_insights_logs = remote_client.get_insights_logs_between(
                 functions_instance,
                 time_from - timedelta(minutes=BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD),
@@ -138,9 +150,11 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 # Which are marked with the [CARIBOU] tag
                 # Or are the AWS Lambda report logs (Just the end of the execution)
                 if log.startswith("[CARIBOU]") or log.startswith("REPORT RequestId:"):
+                    print(f"processing aws log {log}")
                     self._process_log_entry(log, provider_region, time_to)
 
     def _setup_gcp_insights(self, logs: list[str], remote_client: RemoteClient) -> None:
+        print(f"setting up gcp insights for {self.workflow_id}...")
         # clear the insight logs
         self._insights_logs = {}
 
@@ -170,8 +184,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             if not payload:
                 print(f"No httpRequest or protoPayload found in GCP log: {log}")
                 continue
+            print(f"processing insight log for request {request_id}...")
 
             if payload:
+                status_code = int(payload.get("status", 0))
+                if status_code != 200:
+                    continue
+
                 latency_str = payload.get("latency", "0s")
                 latency = float(latency_str.rstrip("s"))
                 self._insights_logs[request_id]["duration"] = latency
@@ -200,8 +219,8 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             if revision_name and timestamp:
                 end_time = (datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                             + timedelta(minutes=BUFFER_GCP_METRICS_GRACE_PERIOD))
-                start_time = end_time - timedelta(seconds=latency)
-
+                start_time = end_time - timedelta(seconds=latency) - timedelta(minutes=BUFFER_GCP_METRICS_GRACE_PERIOD)
+                # print(f">>> start time: {start_time}, end time: {end_time}")
                 # Fetch CPU Usage Time
                 cpu_total_time = remote_client.query_metric(
                     revision_name,
@@ -234,8 +253,10 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
 
                 total_memory = used_memory_max / memory_utilization
                 self._insights_logs[request_id]["total_memory"] = total_memory / (1024**2) # to MBs
+        # print(f"gcp insight logs processed: {self._insights_logs}")
 
     def _setup_lambda_insights(self, logs: list[str]) -> None:
+        print(f"setting up lambda insights for {self.workflow_id}...")
         # Clear the lambda insights logs
         self._insights_logs = {}
 
@@ -244,6 +265,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             log_dict = json.loads(log)
 
             request_id = log_dict.get("request_id", None)
+            print(f"processing aws insight log for request {request_id}...")
             if request_id:
                 important_entries = [
                     "cold_start",
@@ -266,8 +288,10 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                         if request_id not in self._insights_logs:
                             self._insights_logs[request_id] = {}
                         self._insights_logs[request_id][entry] = log_dict[entry]
+        print(f"lambda insights logs processed: {self._insights_logs}")
 
     def _process_log_entry(self, log_entry: str, provider_region: dict[str, str], time_to: datetime) -> None:
+        print("processing log entry:", log_entry)
         provider = provider_region.get("provider", Provider.AWS.value)
 
         if provider == Provider.GCP.value:
@@ -276,7 +300,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             if "run.googleapis.com%2Frequests" in log_name:
                 trace = log_dict.get("trace", None)
 
-                if not trace:
+                if trace is None:
                     return
 
                 request_id = trace.split("/")[-1]
@@ -357,12 +381,17 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         # Extract the request_id from the log entry
         if provider == Provider.GCP.value and log_dict:
             trace = log_dict.get("trace")
-            request_id = trace.split("/")[-1]
+            if trace is None:
+                request_id = self._run_id_request_id_dict.get(run_id, None)
+            else:
+                request_id = trace.split("/")[-1]
+                self._run_id_request_id_dict[run_id] = request_id
         else:
             parts = log_entry.split("\t")
             request_id = parts[2]
         workflow_run_sample.request_ids.add(request_id)
 
+        print(f"log entry processed: {log_entry}")
         self._handle_system_log_messages(
             log_entry, run_id, workflow_run_sample, provider_region, log_time_dt, request_id, time_to
         )
@@ -378,6 +407,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         request_id: str,
         time_to: datetime,
     ) -> None:
+        print("handling system log messages...")
         # Extract the message from the log entry
         pattern = re.compile(r"MESSAGE \((.*?)\) LOG_VERSION")
         match = re.search(pattern, log_entry)
@@ -442,6 +472,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         log_time: datetime,
         request_id: str,
     ) -> None:
+        print("handling entry point log...")
         function_executed: str = self._extract_string_from_log_entry(
             log_entry, r"INSTANCE \((.*?)\)", "function_executed"
         )
@@ -518,12 +549,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         workflow_run_sample: WorkflowRunSample,
         log_entry: str,
     ) -> None:
+        print("handling retrieve wpd logs...")
         retrieved_placement_decision_from_platform: bool = self._extract_boolean_from_log_entry(
             log_entry,
             r"RETRIEVED_PLACEMENT_DECISION_FROM_PLATFORM \((.*?)\)",
             "retrieved_placement_decision_from_platform",
         )
-
+        print(">>> retrieved_placement_decision_from_platform: ", retrieved_placement_decision_from_platform)
         # Handle start hop updates
         workflow_run_sample.start_hop_data.retrieved_wpd_at_function = retrieved_placement_decision_from_platform
 
@@ -535,6 +567,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         log_time: datetime,
         request_id: str,
     ) -> None:
+        print("handling redirect logs...")
         redirecting_instance: str = self._extract_string_from_log_entry(
             log_entry, r"REDIRECTING_INSTANCE \((.*?)\)", "redirecting_instance"
         )
@@ -612,6 +645,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         provider_region: dict[str, str],
         log_time: datetime,
     ) -> None:
+        print("handling invoked logs...")
         taint: str = self._extract_string_from_log_entry(log_entry, r"TAINT \((.*?)\)", "taint")
         transmission_data = workflow_run_sample.get_transmission_data(taint)
         transmission_data.to_region = self._format_region(provider_region)
@@ -620,6 +654,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
     def _extract_executed_logs(
         self, workflow_run_sample: WorkflowRunSample, log_entry: str, provider_region: dict[str, str], request_id: str
     ) -> None:
+        print("handling executed logs...")
         function_executed: str = self._extract_string_from_log_entry(
             log_entry, r"INSTANCE \((.*?)\)", "function_executed"
         )
@@ -646,6 +681,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         log_time: datetime,
         request_id: str,
     ) -> None:
+        print("handling invoking successor logs...")
         taint: str = self._extract_string_from_log_entry(log_entry, r"TAINT \((.*?)\)", "taint")
         caller_function: str = self._extract_string_from_log_entry(log_entry, r"INSTANCE \((.*?)\)", "caller_function")
         callee_function: str = self._extract_string_from_log_entry(log_entry, r"SUCCESSOR \((.*?)\)", "callee_function")
@@ -750,6 +786,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         log_time: datetime,
         request_id: str,
     ) -> None:
+        print("handling invoking sync node logs...")
         taint: str = self._extract_string_from_log_entry(log_entry, r"TAINT \((.*?)\)", "taint")
         caller_function: str = self._extract_string_from_log_entry(log_entry, r"INSTANCE \((.*?)\)", "caller_function")
         successor_function: str = self._extract_string_from_log_entry(
@@ -814,6 +851,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
     def _extract_conditional_non_execution_logs(
         self, workflow_run_sample: WorkflowRunSample, log_entry: str, request_id: str
     ) -> None:
+        print("handling conditional non-execution logs...")
         caller_function: str = self._extract_string_from_log_entry(log_entry, r"INSTANCE \((.*?)\)", "caller_function")
         callee_function: str = self._extract_string_from_log_entry(log_entry, r"SUCCESSOR \((.*?)\)", "callee_function")
         consumed_write_capacity: float = self._extract_float_from_log_entry(
@@ -845,6 +883,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         )
 
     def _extract_cpu_model(self, workflow_run_sample: WorkflowRunSample, log_entry: str, request_id: str) -> None:
+        print("handling cpu model logs...")
         function_executed: str = self._extract_string_from_log_entry(
             log_entry, r"INSTANCE \((.*?)\)", "function_executed"
         )
@@ -862,11 +901,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         execution_data.cpu_model = cpu_model
 
         # Add the CPU model to unique models
+        print(">>> CPU model:", cpu_model)
         workflow_run_sample.cpu_models.add(cpu_model)
 
     def _extract_download_data_from_sync_table(
         self, workflow_run_sample: WorkflowRunSample, log_entry: str, request_id: str
     ) -> None:
+        print("handling download data from sync table logs...")
         function_executed: str = self._extract_string_from_log_entry(
             log_entry, r"INSTANCE \((.*?)\)", "function_executed"
         )

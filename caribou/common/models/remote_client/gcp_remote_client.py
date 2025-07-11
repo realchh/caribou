@@ -217,7 +217,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         bool_list, final_doc = _transaction(tx)
         final_doc["expires_at"] = str(final_doc["expires_at"])
-        consumed_write_capacity = 0.0
+        consumed_write_capacity = 1.0
         response_size = len(json.dumps(final_doc).encode()) / (1024**3)
 
         return bool_list, response_size, consumed_write_capacity
@@ -299,7 +299,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         _transaction(tx)
 
-        return 0.0
+        return 1.0
 
     def get_predecessor_data(
         self,
@@ -316,7 +316,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         data = snap.to_dict() or {}
         messages: list[str] = data.get("message", [])
-        consumed_read_capacity = 0.0
+        consumed_read_capacity = 1.0
         return messages, consumed_read_capacity
 
     def create_function(
@@ -828,10 +828,19 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def update_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._firestore_client
         doc = client.collection(table_name).document(key)
-        if convert_to_bytes:
-            doc.update({"value": compress_json_str(value)})
-        else:
-            doc.update({"value": value})
+        try:
+            if convert_to_bytes:
+                doc.update({"value": compress_json_str(value)})
+            else:
+                doc.update({"value": value})
+        except google_api_exceptions.NotFound:
+            if convert_to_bytes:
+                doc.set({"value": compress_json_str(value)})
+            else:
+                doc.set({"value": value})
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Could not update value in table {table_name} for key {key}: {e}") from e
+
 
     def set_value_in_table_column(
         self, table_name: str, key: str, column_type_value: list[tuple[str, str, str]]
@@ -853,7 +862,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client = self._firestore_client
         doc = client.collection(table_name).document(key).get()
 
-        consumed_read_capacity = 0.0
+        consumed_read_capacity = 1.0
 
         if not doc.exists:
             return "", consumed_read_capacity
@@ -1012,6 +1021,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             f'resource.labels.revision_name="{revision_name}"'
         )
 
+        count_filter_string = (
+            'metric.type="run.googleapis.com/container/instance_count" AND '
+            f'resource.labels.revision_name="{revision_name}"'
+        )
+
         print(f"Executing metric query: {filter_string}")
 
         start_timestamp = timestamp_pb2.Timestamp()
@@ -1028,6 +1042,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             "view": monitoring_v3.types.ListTimeSeriesRequest.TimeSeriesView.FULL,
         }
 
+        count_request: dict[str, Any] = {
+            "name": project_name,
+            "filter": count_filter_string,
+            "interval": interval,
+            "view": monitoring_v3.types.ListTimeSeriesRequest.TimeSeriesView.FULL,
+        }
+
         if aligner:
             align = monitoring_v3.types.Aggregation.Aligner.ALIGN_NONE
             if aligner == "ALIGN_MAX":
@@ -1038,30 +1059,36 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 align = monitoring_v3.types.Aggregation.Aligner.ALIGN_PERCENTILE_99
 
             request["aggregation"] = monitoring_v3.types.Aggregation(
-                alignment_period={"seconds": 30},
+                alignment_period={"seconds": 60},
                 per_series_aligner=align,  # type: ignore
             )
 
+        count_request["aggregation"] = monitoring_v3.types.Aggregation(
+            alignment_period={"seconds": 60},
+            per_series_aligner=monitoring_v3.types.Aggregation.Aligner.ALIGN_MAX,  # type: ignore
+        )
+
         try:
             result = self._monitoring_client.list_time_series(request=request)
-            # print(f"result: {result}")
-            for series in result:
+            count_result = self._monitoring_client.list_time_series(request=count_request)
+
+            for series, count_series in zip(result, count_result):
                 if not series.points:
                     return None
 
                 i = 0
-                max = 0.0
-                for point in series.points:
-                    print(f"point[{i}]: point: {point}")
-                    value = point.value.double_value
-                    if value >= max:
-                        max = value
+                max_value = 0.0
+                for point, container_count in zip(series.points, count_series.points):
+                    print(f"point[{i}]: point: {point.value.double_value}, count: {container_count.value.int64_value}")
+                    value = point.value.double_value / max(container_count.value.int64_value, 1)
+                    if value >= max_value:
+                        max_value = value
                     i += 1
                     # if value != 0.0:
                     #     return value
 
-                print(f"max = {max}")
-                return max
+                print(f"max = {max_value}")
+                return max_value
 
         except google_api_exceptions.GoogleAPICallError as e:
             logger.warning(f"Failed to query metric '{metric_type}': {e}")
@@ -1281,8 +1308,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
 if __name__ == "__main__":
     gcp_remote_client = GCPRemoteClient()
-    start_time = datetime.fromisoformat("2025-07-08T15:19:00-07:00")
-    end_time = datetime.fromisoformat("2025-07-08T15:19:50-07:00")
+    start_time = datetime.fromisoformat("2025-07-07T12:33:45.266-07:00")
+    end_time = datetime.fromisoformat("2025-07-07T12:35:45.266-07:00")
     function_instance = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722"
     # logs = gcp_remote_client.get_logs_between(function_instance, start_time, end_time)
     # print("done:")

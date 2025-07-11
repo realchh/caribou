@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Only add a StreamHandler if not running in AWS Lambda
-if "AWS_LAMBDA_FUNCTION_NAME" not in os.environ:
+if "AWS_LAMBDA_FUNCTION_NAME" not in os.environ or "K_SERVICE" not in os.environ:
     if not logger.handlers:
         logger.addHandler(logging.StreamHandler())
 
