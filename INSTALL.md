@@ -129,3 +129,19 @@ You can get one by following the instructions on the [Electricity Map](https://a
 ## Other dependencies
 
 Since the AWS lambda environment restricts us from using Docker, we have to migrate the workflows using [crane](https://github.com/google/go-containerregistry/tree/main/cmd/crane). If you plan on running the framework locally instead of deploying it to the cloud, please install the crane as described in the [crane documentation](https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md).
+
+# Experimental: GCP Support
+## GCP Account Access
+
+Disclaimer: GCP Support is currently experimental. Use it at your own risk.
+
+To run the framework, you first need to setup a GCP project. 
+
+## Other dependencies
+
+https://cloud.google.com/artifact-registry/docs/docker/copy-images?cloudshell=false
+
+Download gcrane using the command 
+```
+go install github.com/google/go-containerregistry/cmd/gcrane@latest
+```

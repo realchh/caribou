@@ -23,3 +23,5 @@ types-protobuf
 google-cloud-artifact-registry
 google-cloud-resource-manager
 numpy==2.2.1
+
+google-cloud-monitoring

@@ -63,6 +63,7 @@ class MockRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         environment_variables,
         timeout,
         memory_size,
+        cpu: float | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ):
         pass

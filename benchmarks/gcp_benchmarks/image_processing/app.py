@@ -12,9 +12,9 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Change the following bucket name and region to match your setup
-gcp_bucket_name = "caribou-image-processing-benchmark-naufal"
+gcp_bucket_name = "caribou-image-processing-benchmark"
 
-workflow = CaribouWorkflow(name="image_processing", version="0.0.4")
+workflow = CaribouWorkflow(name="image_processing", version="0.0.1")
 
 @workflow.serverless_function(
     name="get_requests",

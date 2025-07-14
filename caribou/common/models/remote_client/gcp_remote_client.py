@@ -40,7 +40,8 @@ from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     SYNC_TABLE_TTL,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
-from caribou.common.utils import compress_json_str, decompress_json_str
+from caribou.common.utils import compress_json_str, decompress_json_str, get_country_abbreviation, \
+    get_region_abbreviation
 from caribou.deployment.common.deploy.models.resource import Resource
 
 logger = logging.getLogger(__name__)
@@ -428,8 +429,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return client.get_service(name=full_name).uri
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
+        print(f"storing deployed image uri for function: {function_name}")
         workflow_instance_id = "-".join(function_name.split("-")[0:5])
+        print(f"workflow instance id: {workflow_instance_id}")
         function_name_simple = function_name[len(workflow_instance_id) + 1 :]
+        print(f"function name simple: {function_name_simple}")
+        function_name_simple = "-".join(function_name_simple.split("-")[0:3])
+        print(f"function name simple: {function_name_simple}")
+
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 
@@ -439,9 +446,78 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         document = client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id)
         document.set({function_name_simple: image_name}, merge=True)
 
+    def _copy_image_to_region(self, deployed_image_uri: str) -> str:
+        parts = deployed_image_uri.split("/")
+        original_region = "-".join(parts[0].split("-")[0:2])
+        original_image_name = parts[1]
+
+        artifact_registry_client = self._artifact_registry_client
+        new_region = self._region
+
+        new_region_country = new_region.split("-")[0]
+        new_region_country = get_country_abbreviation(new_region_country)
+        new_region_region = new_region.split("-")[1]
+        new_region_region = get_region_abbreviation(new_region_region)
+
+        new_region = f"{new_region_country}-{new_region_region}"
+
+        new_image_name = original_image_name.replace(original_region, new_region)
+
+        repo_id = "caribou"  # Base artifact registry repo to hold the docker images used for deployment
+        self._ensure_repository(repo_id)
+
+        host = f"{self._region}-docker.pkg.dev"
+        image_path = f"{host}/{self._project_id}/{repo_id}"
+
+        name, tag = (image_name.split(":", 1) + ["latest"])[:2]
+        remote = f"{image_path}/{name}:{tag}"
+
+        subprocess.run(
+            ["gcloud", "auth", "configure-docker", host, "--quiet"],
+            check=True,
+        )
+
+        # subprocess.run(["docker", "tag", image_name, remote], check=True)
+        # subprocess.run(["docker", "push", remote], check=True)
+        #
+        # logging.info("Pushed image %s", remote)
+        # return remote
+
+        original_ecr_registry = f"{account_id}.dkr.ecr.{original_region}.amazonaws.com"
+        ecr_registry = f"{account_id}.dkr.ecr.{new_region}.amazonaws.com"
+
+        new_image_uri = f"{ecr_registry}/{new_image_name}"
+
+        # Use /tmp directory which is writable in AWS Lambda
+        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
+            # Force environment variables to use the temporary directory
+            env = os.environ.copy()
+            env["HOME"] = temp_dir
+            env["XDG_CACHE_HOME"] = os.path.join(temp_dir, ".cache")
+            env["XDG_CONFIG_HOME"] = os.path.join(temp_dir, ".config")
+            env["XDG_DATA_HOME"] = os.path.join(temp_dir, ".local", "share")
+
+            print(f"Using crane to copy image from {original_ecr_registry} to {ecr_registry}")
+            try:
+                subprocess.run(
+                    ["crane", "cp", deployed_image_uri, new_image_uri],
+                    cwd=temp_dir,
+                    env=env,  # Use the modified environment variables
+                    check=True,
+                )
+                logger.info("Docker image %s copied successfully.", new_image_uri)
+            except subprocess.CalledProcessError as e:
+                logger.error("Failed to copy Docker image %s. Error: %s", new_image_uri, e)
+            return new_image_uri
+
     def _get_deployed_image_uri(self, function_name: str) -> str:
+        print(f"getting deployed image uri for function: {function_name}")
         workflow_instance_id = "-".join(function_name.split("-")[0:5])
+        print(f"workflow instance id: {workflow_instance_id}")
         function_name_simple = function_name[len(workflow_instance_id) + 1 :]
+        print(f"function name simple: {function_name_simple}")
+        function_name_simple = "-".join(function_name_simple.split("-")[0:3])
+        print(f"function name simple: {function_name_simple}")
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 
@@ -560,6 +636,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         deployed_image_uri = self._get_deployed_image_uri(function_name)
@@ -780,7 +857,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return response.name
 
     def create_pubsub_subscription(
-        self, topic: str, subscription_name: str, push_endpoint: str, service_account_name: str
+        self, topic: str,
+            subscription_name: str,
+            push_endpoint: str,
+            service_account_name: str,
+            timeout: int
     ) -> str:
         client = self._pubsub_subscriber_client
 
@@ -792,7 +873,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         subscription_path = client.subscription_path(project=self._project_id, subscription=subscription_name)
 
         try:
-            response = client.create_subscription(name=subscription_path, topic=topic, push_config=push_config)
+            response = client.create_subscription(
+                name=subscription_path,
+                topic=topic,
+                push_config=push_config,
+                ack_deadline_seconds=timeout,
+            )
         except google_api_exceptions.AlreadyExists:
             return subscription_path
         return response.name
@@ -1332,7 +1418,7 @@ if __name__ == "__main__":
     # memory_utilization = gcp_remote_client.query_metric(
     #     revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
     # )
-    service_object = gcp_remote_client.get_cloud_run_service_object("dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722")
-    print(service_object)
-
+    # service_object = gcp_remote_client.get_cloud_run_service_object("dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722")
+    # print(service_object)
+    print(gcp_remote_client._get_deployed_image_uri("fem-tion-0-0-2-solv-fem-gcp-us-ea1-9521c346e2a4"))
     # print(f"Memory utilization: {memory_utilization}")

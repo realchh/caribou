@@ -48,7 +48,7 @@ class GCPDeployInstructions(DeployInstructions):
                 "handler": handler,
                 "environment_variables": environment_variables,
                 "timeout": self._config["timeout"],
-                "memory_size": self._config["memory"],
+                "memory_size": memory_size,
                 "cpu": self._config.get("vcpu", max(1.0, memory_size // 1024)),
                 "additional_docker_commands": self._config.get("additional_docker_commands", []),
             },
@@ -65,6 +65,7 @@ class GCPDeployInstructions(DeployInstructions):
         environment_variables: dict[str, str],
         function_varname: str,
     ) -> Instruction:
+        memory_size = self._config["memory"]
         return APICall(
             name="update_function",
             params={
@@ -75,7 +76,8 @@ class GCPDeployInstructions(DeployInstructions):
                 "handler": handler,
                 "environment_variables": environment_variables,
                 "timeout": self._config["timeout"],
-                "memory_size": self._config["memory"],
+                "memory_size": memory_size,
+                "cpu": self._config.get("vcpu", max(1.0, memory_size // 1024)),
                 "additional_docker_commands": self._config.get("additional_docker_commands", []),
             },
             output_var=function_varname,
@@ -104,6 +106,7 @@ class GCPDeployInstructions(DeployInstructions):
                 "subscription_name": subscription_varname,
                 "push_endpoint": Variable(function_varname),
                 "service_account_name": Variable(iam_role_varname),
+                "timeout": self._config["timeout"],
             },
             output_var=subscription_varname,
         )

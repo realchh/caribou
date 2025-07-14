@@ -36,6 +36,14 @@ class RegionAndProviders(BaseModel):
                     raise ValueError("The 'config' dictionary must contain 'memory' key with an integer value")
                 if "timeout" not in config or not isinstance(config["timeout"], int):
                     raise ValueError("The 'config' dictionary must contain 'timeout' key with an integer value")
+            if provider == "gcp":
+                config = values.providers[provider].config
+                if "memory" not in config or not isinstance(config["memory"], int):
+                    raise ValueError("The 'config' dictionary must contain 'memory' key with an integer value")
+                if "timeout" not in config or not isinstance(config["timeout"], int):
+                    raise ValueError("The 'config' dictionary must contain 'timeout' key with an integer value")
+                if "vcpu" not in config or not isinstance(config["vcpu"], float):
+                    raise ValueError("The 'config' dictionary must contain 'vcpu' key with a float value")
         return values
 
 

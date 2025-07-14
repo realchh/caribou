@@ -21,7 +21,7 @@ MAX_FANOUT_NUM = 6
 s3_bucket_name = "caribou-video-analytics"
 s3_bucket_region_name = "us-east-1"
 
-workflow = CaribouWorkflow(name="video_analytics", version="0.0.2")
+workflow = CaribouWorkflow(name="video_analytics", version="0.0.1")
 
 # Setup the torch home directory path
 model_storage_path = '/tmp/model_storage'
