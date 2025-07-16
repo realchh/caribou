@@ -19,9 +19,9 @@ from google.cloud import storage
 MAX_FANOUT_NUM = 6
 
 # Change the following bucket name and region to match your setup
-gcp_bucket_name = "caribou-video-analytics-naufal"
+gcp_bucket_name = "caribou-video-analytics"
 
-workflow = CaribouWorkflow(name="video_analytics", version="0.0.2")
+workflow = CaribouWorkflow(name="video_analytics", version="0.0.1")
 
 # Setup the torch home directory path
 model_storage_path = '/tmp/model_storage'

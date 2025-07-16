@@ -139,9 +139,24 @@ To run the framework, you first need to setup a GCP project.
 
 ## Other dependencies
 
-https://cloud.google.com/artifact-registry/docs/docker/copy-images?cloudshell=false
+We are using [gcrane](https://cloud.google.com/artifact-registry/docs/docker/copy-images#gcrane-local
+) to copy artifact images to another artifact registry region.
 
-Download gcrane using the command 
+For linux users:
+
+Download gcrane using the command: 
 ```
-go install github.com/google/go-containerregistry/cmd/gcrane@latest
+curl -L \
+https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
+-o go-containerregistry.tar.gz
+```
+And install it using:
+```
+tar -zxvf go-containerregistry.tar.gz
+chmod +x gcrane
+sudo mv gcrane /usr/local/bin/
+```
+To verify that gcrane is installed, you can try running:
+```
+gcrane version
 ```

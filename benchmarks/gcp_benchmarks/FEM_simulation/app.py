@@ -10,7 +10,7 @@ import logging
 from tempfile import TemporaryDirectory
 from google.cloud import storage
 
-workflow = CaribouWorkflow(name="FEM_simulation", version="0.0.2")
+workflow = CaribouWorkflow(name="FEM_simulation", version="0.0.1")
 
 gcp_bucket_name = "caribou-fem-simulation"
 

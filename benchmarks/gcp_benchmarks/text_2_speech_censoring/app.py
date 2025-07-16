@@ -12,7 +12,7 @@ from pydub import AudioSegment
 from tempfile import TemporaryDirectory
 
 # Change the following bucket name and region to match your setup
-gcp_bucket_name = "caribou-text-2-speech-censoring-naufal"
+gcp_bucket_name = "caribou-text-2-speech-censoring"
 # polly_region_name = "us-east-1" # Note AWS Polly is not available in all regions
 
 workflow = CaribouWorkflow(name="text_2_speech_censoring", version="0.0.1")

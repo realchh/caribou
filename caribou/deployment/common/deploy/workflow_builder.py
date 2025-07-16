@@ -277,9 +277,9 @@ class WorkflowBuilder:
                         gcp_workflow_service_account = generate_workflow_service_account_id(
                             config.workflow_name, config.workflow_version
                         )
-                        function_role = self.get_function_role(config, gcp_workflow_service_account)
+                        function_role = IAMRole(function["role"]["policy_file"], gcp_workflow_service_account)
                     else:
-                        function_role = self.get_function_role(config, function_name)
+                        function_role = IAMRole(function["role"]["policy_file"], f"{function_name}-role")
 
                     resources.append(
                         Function(

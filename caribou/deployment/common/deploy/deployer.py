@@ -10,6 +10,8 @@ from caribou.common.constants import (
     WORKFLOW_PLACEMENT_DECISION_TABLE,
 )
 from caribou.common.models.endpoints import Endpoints
+from caribou.common.provider import Provider
+from caribou.common.utils import generate_workflow_gcp_function_name
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.deploy.deployment_packager import DeploymentPackager
 from caribou.deployment.common.deploy.executor import Executor
@@ -114,16 +116,20 @@ class Deployer:
         deployed_regions: dict[str, dict[str, str]],
         specific_staging_area_data: dict[str, Any],
     ) -> dict[str, dict[str, Any]]:
+        print(f"redeploying workflow: {self._config.workflow_name} with version {self._config.workflow_version} \n\n")
+        print(f"workflow function descriptions: {workflow_function_descriptions} \n\n")
+        print(f"deployed regions: {deployed_regions} \n\n")
+        print(f"specific staging area data: {specific_staging_area_data} \n\n")
         function_to_deployment_regions = self._get_function_to_deployment_regions(specific_staging_area_data)
 
         filtered_function_to_deployment_regions = self._filter_function_to_deployment_regions(
             function_to_deployment_regions, deployed_regions
         )
-
+        print(f"filtered function to deployment regions: {filtered_function_to_deployment_regions} \n\n")
         self._workflow = self._workflow_builder.re_build_workflow(
             self._config, filtered_function_to_deployment_regions, workflow_function_descriptions, deployed_regions
         )
-
+        print(f"rebuilt workflow: {self._workflow} \n\n")
         # Disabled as part of issue #293
         # self._deployment_packager.re_build(self._workflow, self._endpoints.get_deployment_resources_client())
 
@@ -133,27 +139,34 @@ class Deployer:
         deployment_plan = DeploymentPlan(self._workflow.get_deployment_instructions())
 
         assert self._executor is not None, "Executor is None, this should not happen"
-
+        print(f"deployment plan: {deployment_plan} \n\n")
         self._executor.execute(deployment_plan)
 
         self._update_deployed_regions(deployed_regions)
         return self._get_new_deployment_instances(specific_staging_area_data)
 
     def _get_function_to_deployment_regions(self, staging_area_data: dict) -> dict[str, dict[str, str]]:
+        print(f"getting function to deployment regions: {staging_area_data} \n\n")
         function_to_deployment_regions: dict[str, dict[str, str]] = {}
         for instance_name, placement in staging_area_data.items():
-            function_name = (
-                instance_name.split(":", maxsplit=1)[0]
-                + "_"
-                + placement["provider_region"]["provider"]
-                + "-"
-                + placement["provider_region"]["region"]
-            )
+            provider = placement["provider_region"]["provider"]
+            if provider == Provider.GCP.value:
+                function_run_name = instance_name.split(":", maxsplit=1)[0]
+                function_name = generate_workflow_gcp_function_name(self._config.workflow_name, self._config.workflow_version, function_run_name, placement["provider_region"])
+            else:
+                function_name = (
+                    instance_name.split(":", maxsplit=1)[0]
+                    + "_"
+                    + placement["provider_region"]["provider"]
+                    + "-"
+                    + placement["provider_region"]["region"]
+                )
             if function_name not in function_to_deployment_regions:
                 function_to_deployment_regions[function_name] = {
                     "provider": placement["provider_region"]["provider"],
                     "region": placement["provider_region"]["region"],
                 }
+            print(f"function to deployment regions: {function_to_deployment_regions} \n\n")
         return function_to_deployment_regions
 
     def _filter_function_to_deployment_regions(
@@ -163,8 +176,11 @@ class Deployer:
     ) -> dict[str, dict[str, str]]:
         filtered_function_to_deployment_regions: dict[str, dict[str, str]] = {}
         for function_name, deployment_regions in function_to_deployment_regions.items():
+            print(f"function name: {function_name}")
+            print(f"deployment regions: {deployment_regions} \n\n")
             if function_name not in deployed_regions:
                 filtered_function_to_deployment_regions[function_name] = deployment_regions
+        print(f"filtered function to deployment regions: {filtered_function_to_deployment_regions} \n\n")
         return filtered_function_to_deployment_regions
 
     def _set_workflow_id(self) -> None:

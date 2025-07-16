@@ -1,6 +1,8 @@
 import re
 from typing import Any, Optional, Sequence
 
+from caribou.common.provider import Provider
+from caribou.common.utils import generate_workflow_gcp_function_name
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.deploy.models.deployment_package import DeploymentPackage
 from caribou.deployment.common.deploy.models.function import Function
@@ -39,6 +41,9 @@ class Workflow(Resource):
         self._deployed_regions = deployed_regions
 
     def get_deployment_instructions(self) -> dict[str, list[Instruction]]:
+        print("getting deployment instructions")
+        print(f"config: {self._config}")
+        print(f"resources: {self._resources}")
         plans: dict[str, list[Instruction]] = {}
         if self._config is None:
             raise ValueError("Config not set, this state should not be reachable")
@@ -219,6 +224,9 @@ class Workflow(Resource):
         deployment_instances = {}
         function_instance_to_resource_name = self._get_function_instance_to_resource_name(staging_area_placement)
 
+        print(f"deployed regions: {self._deployed_regions}")
+        print(f"function instance to resource name: {function_instance_to_resource_name}")
+
         for instance_name, instance in staging_area_placement.items():
             instance["identifier"] = self._deployed_regions[function_instance_to_resource_name[instance_name]][
                 "message_topic"
@@ -228,16 +236,26 @@ class Workflow(Resource):
             ]
             deployment_instances[instance_name] = instance
 
+        print(f"deployment instances: {deployment_instances}")
         return deployment_instances
 
     def _get_function_instance_to_resource_name(self, staging_area_placement: dict[str, Any]) -> dict[str, str]:
         function_instance_to_resource_name = {}
         for instance_name, placement in staging_area_placement.items():
+            print(f"instance name: {instance_name}")
+            print(f"placement: {placement}")
+
             function_name = instance_name.split(":")[0]
 
             provider_region = placement["provider_region"]
 
-            function_resource_name = function_name + "_" + provider_region["provider"] + "-" + provider_region["region"]
+            if provider_region["provider"] == Provider.GCP.value:
+                function_resource_name = generate_workflow_gcp_function_name(
+                    self.name, self.version, function_name, provider_region
+                )
+            else:
+                function_resource_name = (function_name + "_" + provider_region["provider"]
+                                          + "-" + provider_region["region"])
 
             function_instance_to_resource_name[instance_name] = function_resource_name
 
