@@ -20,11 +20,11 @@ from caribou.deployment.client.remote_cli.remote_cli import (
     get_all_available_timed_cli_functions,
     get_all_default_timed_cli_functions,
     get_cli_invoke_payload,
-    is_aws_framework_deployed,
-    remove_aws_timers,
+    is_framework_deployed,
     remove_remote_framework,
+    remove_timers,
     report_timer_schedule_expression,
-    setup_aws_timers,
+    setup_timers,
     valid_framework_dir,
 )
 from caribou.deployment.common.config.config import Config
@@ -39,7 +39,6 @@ from caribou.syncers.log_syncer import LogSyncer
 AVAILABLE_CLI_FUNCTIONS = get_all_available_timed_cli_functions()
 
 
-# TODO: add function to deploy to GCP, deploy GCP remote cli (after everything else is sorted)
 # Helper function to execute a command on the remote framework
 def _execute_remote_command(
     action: str,
@@ -50,7 +49,7 @@ def _execute_remote_command(
 ) -> None:
     """Helper function to execute a command on the remote framework."""
     framework_cli_remote_client = Endpoints().get_framework_cli_remote_client()
-    framework_deployed = is_aws_framework_deployed(framework_cli_remote_client, verbose=verbose)
+    framework_deployed = is_framework_deployed(verbose)
     if not framework_deployed:
         raise click.ClickException("The remote framework is not deployed.")
 
@@ -335,22 +334,28 @@ def setup_timer(
         schedule_expression = get_all_default_timed_cli_functions()[timer]
 
     # Setup the timer
-    setup_aws_timers([(timer, schedule_expression)])
+    setup_timers([(timer, schedule_expression)])
 
 
 @cli.command(
     "setup_all_timers",
     help=(
-        "Setup ALL automatic timer for AWS remote CLI with default rules. "
+        "Setup ALL automatic timer for remote CLI with default rules. "
         "Use list_timers to see available timers, and setup_timer to modify."
     ),
 )
 @click.pass_context
 def setup_all_timers(_: click.Context) -> None:
     """
+    (AWS)
     Setup automatic timers for AWS Lambda functions. (Use cron(...) or rate(...) expressions)
     Format Info:
     https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-scheduled-rule-pattern.html
+
+    (GCP)
+    Setup automatic timers for GCP Cloud Functions. Use cron(...) expressions)
+    Format Info:
+    https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules#cron_job_format
     """
     default_schedule_expressions = get_all_default_timed_cli_functions()
     new_rules: list[tuple[str, str]] = []
@@ -358,7 +363,7 @@ def setup_all_timers(_: click.Context) -> None:
         schedule_expr = default_schedule_expressions[function_name]
         new_rules.append((function_name, schedule_expr))
 
-    setup_aws_timers(new_rules)
+    setup_timers(new_rules)
 
 
 @cli.command("remove_timer", help="Remove an existing remote timer. Use list_timers to see available timers.")
@@ -369,18 +374,19 @@ def setup_all_timers(_: click.Context) -> None:
 )
 def remove_timer(timer: str) -> None:
     # Remove the timer
-    remove_aws_timers([timer])
+    remove_timers([timer])
 
 
-@cli.command("remove_all_timers", help="Remove ALL automatic timers for AWS remote CLI.")
+@cli.command("remove_all_timers", help="Remove ALL automatic timers for remote CLI.")
 def remove_all_timers() -> None:
     """
-    Remove all automatic timers for AWS Lambda functions.
+    (AWS) Remove all automatic timers for AWS Lambda functions.
+    (GCP) Remove all automatic timers for GCP Cloud Run services.
     """
-    remove_aws_timers(AVAILABLE_CLI_FUNCTIONS)
+    remove_timers(AVAILABLE_CLI_FUNCTIONS)
 
 
-@cli.command("remove_remote_cli", help="Deploy the remote framework from AWS Lambda.")
+@cli.command("remove_remote_cli", help="Remove the remote framework.")
 def remove_remote_cli() -> None:
     remove_remote_framework()
 

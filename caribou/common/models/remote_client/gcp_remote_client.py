@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import google.auth
 import google.auth.transport.requests
+import google.oauth2
 import requests
 from google.api_core import exceptions as google_api_exceptions
 from google.api_core.client_options import ClientOptions
@@ -29,7 +30,7 @@ from google.cloud import (
 )
 from google.cloud.iam_admin_v1 import IAMClient
 from google.iam.v1 import policy_pb2
-from google.oauth2 import service_account
+from google.oauth2 import id_token, service_account  # pylint: disable=unused-import
 from google.protobuf import field_mask_pb2, timestamp_pb2
 from google.pubsub_v1 import PushConfig
 
@@ -1215,6 +1216,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             function_name, image_uri, role_arn, timeout, memory_size, ephemeral_storage
         )
 
+    # TODO: check this
     def _generate_framework_dockerfile(self, handler: str, env_vars: dict) -> str:
         # Create ENV statements for each environment variable
         env_statements = "\n".join([f'ENV {key}="{value}"' for key, value in env_vars.items()])
@@ -1418,9 +1420,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         credentials = self._credentials
         credentials.refresh(auth_req)
 
-        id_token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
+        identity_token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
 
-        headers = {"Authorization": f"Bearer {id_token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {identity_token}", "Content-Type": "application/json"}
 
         try:
             response = requests.post(target_url, headers=headers, json=payload, timeout=30)
@@ -1428,3 +1430,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             logger.info("Successfully invoked remote CLI. Status: %d", response.status_code)
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Failed to invoke remote CLI at {target_url}: {e}") from e
+
+    def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
+        # This method should not be reached, but it is here to satisfy the interface.
+        raise NotImplementedError()

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from caribou.common.models.remote_client.remote_client import RemoteClient
 
@@ -131,4 +131,40 @@ class MockRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         end: datetime,
         aligner: str | None = None,
     ) -> float | None:
+        pass
+
+    def deploy_remote_cli(
+        self,
+        function_name: str,
+        handler: str,
+        role_arn: str,
+        timeout: int,
+        memory_size: int,
+        ephemeral_storage: int,
+        zip_contents: bytes,
+        tmpdirname: str,
+        env_vars: dict,
+    ) -> None:
+        pass
+
+    def get_timer_rule_schedule_expression(self, rule_name: str) -> Optional[str]:
+        pass
+
+    def remove_timer_rule(self, lambda_function_name: str, rule_name: str) -> None:
+        pass
+
+    def create_timer_rule(
+        self, lambda_function_name: str, schedule_expression: str, rule_name: str, event_payload: str
+    ) -> None:
+        pass
+
+    def invoke_remote_framework_internal_action(self, action_type: str, action_events: dict[str, Any]) -> None:
+        pass
+
+    def invoke_remote_framework_with_payload(
+        self, payload: dict[str, Any], invocation_type: str = "RequestResponse"
+    ) -> None:
+        pass
+
+    def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         pass

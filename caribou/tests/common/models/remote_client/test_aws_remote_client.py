@@ -1265,7 +1265,7 @@ class TestAWSRemoteClient(unittest.TestCase):
 
         # Check that the error message was logged
         self.assertIn(
-            "Error removing the EventBridge rule test_rule: An error occurred (InternalError)",
+            "Error getting the EventBridge rule test_rule: An error occurred (InternalError)",
             captured_output.getvalue(),
         )
 

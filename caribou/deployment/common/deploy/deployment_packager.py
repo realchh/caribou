@@ -88,8 +88,6 @@ class DeploymentPackager:
                 if "boto3" not in requirements:
                     file.write(f"\nboto3=={boto3.__version__}\n")
             if provider == "gcp":
-                if "boto3" not in requirements:
-                    file.write(f"\nboto3=={boto3.__version__}\n")
                 if "google-cloud" not in requirements:
                     file.write("\ngoogle-cloud==0.34.0\n")
                 if "google-cloud-storage" not in requirements:
@@ -324,8 +322,6 @@ class DeploymentPackager:
                 requirements.append(f"boto3=={boto3.__version__}")
 
         if self._determine_home_provider() == "gcp":
-            if "boto3" not in requirements:
-                requirements.append(f"boto3=={boto3.__version__}")
             if "google-cloud" not in requirements:
                 requirements.append("google-cloud==0.34.0")
             if "google-cloud-storage" not in requirements:

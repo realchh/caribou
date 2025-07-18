@@ -68,6 +68,18 @@ class TestConfigSchema(unittest.TestCase):
         with pytest.raises(ValueError, match="The 'config' dictionary must contain 'vcpu' key with a float value"):
             RegionAndProviders(providers={"gcp": Provider(config={"timeout": 300, "memory": 512})})
 
+    def test_validate_config_gcp_invalid_vcpu_lower(self):
+        with pytest.raises(
+            ValueError, match="The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
+        ):
+            RegionAndProviders(providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 0.01})})
+
+    def test_validate_config_gcp_invalid_vcpu_not_in_list(self):
+        with pytest.raises(
+            ValueError, match="The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
+        ):
+            RegionAndProviders(providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 3.0})})
+
     def test_constraint_invalid_type(self):
         with pytest.raises(ValueError, match="Constraint type invalid is not supported"):
             Constraint(value=1.0, type="invalid")

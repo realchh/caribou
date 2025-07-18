@@ -1,7 +1,6 @@
 import os
 
 from caribou.common.constants import GLOBAL_GCP_SYSTEM_REGION, GLOBAL_SYSTEM_REGION, INTEGRATION_TEST_SYSTEM_REGION
-from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 from caribou.common.provider import Provider
@@ -40,10 +39,8 @@ class Endpoints:  # pylint: disable=too-many-instance-attributes
         self._data_store_region = global_system_region
         self._data_store_client: RemoteClient | None = None
 
-        if self._provider == Provider.AWS.value:
-            self._framework_cli_remote_client = RemoteClientFactory.get_framework_cli_remote_client(
-                GLOBAL_SYSTEM_REGION
-            )
+        self._framework_cli_region = global_system_region
+        self._framework_cli_remote_client: RemoteClient | None = None
 
     def get_deployment_resources_client(self) -> RemoteClient:
         if self._deployment_resources_client is None:
@@ -78,5 +75,9 @@ class Endpoints:  # pylint: disable=too-many-instance-attributes
             self._data_store_client = RemoteClientFactory.get_remote_client(self._provider, self._data_store_region)
         return self._data_store_client
 
-    def get_framework_cli_remote_client(self) -> AWSRemoteClient:
+    def get_framework_cli_remote_client(self) -> RemoteClient:
+        if self._framework_cli_remote_client is None:
+            self._framework_cli_remote_client = RemoteClientFactory.get_remote_client(
+                self._provider, self._framework_cli_region
+            )
         return self._framework_cli_remote_client

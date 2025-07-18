@@ -1049,6 +1049,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         ENV GOROOT=/usr/local/go
 
         # Install Poetry via pip
+        RUN microdnf install -y gcc-c++ libstdc++-static && microdnf clean all
         RUN pip3 install poetry
 
         # Copy Python dependency management files

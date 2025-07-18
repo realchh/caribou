@@ -1,13 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.provider import Provider
-
-if TYPE_CHECKING:
-    from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
-    from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClient
 
 
 class RemoteClientFactory:
@@ -35,10 +29,3 @@ class RemoteClientFactory:
 
             return IntegrationTestRemoteClient()
         raise RuntimeError(f"Unknown provider {provider}")
-
-    @staticmethod
-    # pylint: disable=import-outside-toplevel
-    def get_framework_cli_remote_client(region: str) -> AWSRemoteClient:
-        from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
-
-        return AWSRemoteClient(region)
