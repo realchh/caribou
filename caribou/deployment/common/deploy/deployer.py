@@ -125,11 +125,9 @@ class Deployer:
         filtered_function_to_deployment_regions = self._filter_function_to_deployment_regions(
             function_to_deployment_regions, deployed_regions
         )
-        print(f"filtered function to deployment regions: {filtered_function_to_deployment_regions} \n\n")
         self._workflow = self._workflow_builder.re_build_workflow(
             self._config, filtered_function_to_deployment_regions, workflow_function_descriptions, deployed_regions
         )
-        print(f"rebuilt workflow: {self._workflow} \n\n")
         # Disabled as part of issue #293
         # self._deployment_packager.re_build(self._workflow, self._endpoints.get_deployment_resources_client())
 
@@ -139,7 +137,6 @@ class Deployer:
         deployment_plan = DeploymentPlan(self._workflow.get_deployment_instructions())
 
         assert self._executor is not None, "Executor is None, this should not happen"
-        print(f"deployment plan: {deployment_plan} \n\n")
         self._executor.execute(deployment_plan)
 
         self._update_deployed_regions(deployed_regions)
@@ -152,7 +149,12 @@ class Deployer:
             provider = placement["provider_region"]["provider"]
             if provider == Provider.GCP.value:
                 function_run_name = instance_name.split(":", maxsplit=1)[0]
-                function_name = generate_workflow_gcp_function_name(self._config.workflow_name, self._config.workflow_version, function_run_name, placement["provider_region"])
+                function_name = generate_workflow_gcp_function_name(
+                    self._config.workflow_name,
+                    self._config.workflow_version,
+                    function_run_name,
+                    placement["provider_region"],
+                )
             else:
                 function_name = (
                     instance_name.split(":", maxsplit=1)[0]

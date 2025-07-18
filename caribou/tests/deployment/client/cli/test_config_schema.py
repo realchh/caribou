@@ -52,7 +52,21 @@ class TestConfigSchema(unittest.TestCase):
         RegionAndProviders(providers={"provider1": Provider(config={"memory": 512, "timeout": 10})})
 
     def test_validate_config_gcp_valid_config(self):
-        RegionAndProviders(providers={"gcp": Provider(config={})})
+        RegionAndProviders(providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 1.0})})
+
+    def test_validate_config_gcp_missing_timeout(self):
+        with pytest.raises(
+            ValueError, match="The 'config' dictionary must contain 'timeout' key with an integer value"
+        ):
+            RegionAndProviders(providers={"gcp": Provider(config={"memory": 512, "vcpu": 1.0})})
+
+    def test_validate_config_gcp_missing_memory(self):
+        with pytest.raises(ValueError, match="The 'config' dictionary must contain 'memory' key with an integer value"):
+            RegionAndProviders(providers={"gcp": Provider(config={"timeout": 300, "vcpu": 1.0})})
+
+    def test_validate_config_gcp_missing_vcpu(self):
+        with pytest.raises(ValueError, match="The 'config' dictionary must contain 'vcpu' key with a float value"):
+            RegionAndProviders(providers={"gcp": Provider(config={"timeout": 300, "memory": 512})})
 
     def test_constraint_invalid_type(self):
         with pytest.raises(ValueError, match="Constraint type invalid is not supported"):

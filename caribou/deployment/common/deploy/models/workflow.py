@@ -250,12 +250,16 @@ class Workflow(Resource):
             provider_region = placement["provider_region"]
 
             if provider_region["provider"] == Provider.GCP.value:
+                if self.version is None:
+                    raise RuntimeError("Workflow version is not set. This should be impossible")
+
                 function_resource_name = generate_workflow_gcp_function_name(
                     self.name, self.version, function_name, provider_region
                 )
             else:
-                function_resource_name = (function_name + "_" + provider_region["provider"]
-                                          + "-" + provider_region["region"])
+                function_resource_name = (
+                    function_name + "_" + provider_region["provider"] + "-" + provider_region["region"]
+                )
 
             function_instance_to_resource_name[instance_name] = function_resource_name
 

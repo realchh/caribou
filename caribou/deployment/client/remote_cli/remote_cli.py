@@ -82,10 +82,7 @@ def deploy_remote_framework(project_dir: str, timeout: int, memory_size: int, ep
             zip_contents = f.read()
 
         # Retrieve the required environment variables
-        desired_env_vars = [
-            "GOOGLE_API_KEY",
-            "ELECTRICITY_MAPS_AUTH_TOKEN",
-        ]
+        desired_env_vars = ["GOOGLE_API_KEY", "ELECTRICITY_MAPS_AUTH_TOKEN", "CARIBOU_DEFAULT_PROVIDER"]
         env_vars = _get_env_vars(desired_env_vars)
 
         # Deploy to AWS

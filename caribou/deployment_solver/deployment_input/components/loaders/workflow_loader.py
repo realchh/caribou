@@ -367,7 +367,7 @@ class WorkflowLoader(InputLoader):
                 vcpu = self.get_memory(instance_name, provider_name) / 1769
             elif provider_name == Provider.GCP.value:
                 memory_size = self.get_memory(instance_name, provider_name)
-                vcpu =  max(1.0, memory_size // 1024)
+                vcpu = max(1.0, memory_size // 1024)
             else:
                 raise ValueError(
                     f"vCPU count for instance {instance_name} in provider {provider_name} is not available"

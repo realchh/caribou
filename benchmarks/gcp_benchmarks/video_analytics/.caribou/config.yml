@@ -32,6 +32,6 @@ regions_and_providers:
   providers:
     gcp:
       config:
-        timeout: 600
-        memory: 2048
-        vcpu: 2.0
+        timeout: 1200
+        memory: 4096
+        vcpu: 4.0

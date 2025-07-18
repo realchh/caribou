@@ -296,13 +296,6 @@ class Client:
         role_name = f"{identifier}-role"
         messaging_topic_name = f"{identifier}_messaging_topic"
         client = self._get_remote_client(provider, region)
-        print("provider: ", provider)
-        print("region: ", region)
-        print("identifier: ", identifier)
-        print(
-            f"Removing function {function_instance}"
-            f" from provider {provider} in region {region} with identifier {identifier}"
-        )
         # Remove the ECR repository
         try:
             if isinstance(client, AWSRemoteClient):
@@ -336,7 +329,7 @@ class Client:
             print(f"Could not remove function {identifier}: {str(e)}")
 
         # Remove the IAM role
-        if isinstance(client, AWSRemoteClient):
+        if not isinstance(client, GCPRemoteClient):
             try:
                 client.remove_role(role_name)
             except RuntimeError as e:
@@ -347,7 +340,6 @@ class Client:
         print(f"Removed function {function_instance} from provider {provider} in region {region}")
 
     def _remove_shared_gcp_resource(self, gcp_region_client: GCPRemoteClient) -> None:
-        print(f"removing shared GCP resource (service account) for workflow {self._workflow_id}")
         if self._workflow_id is None:
             return
 
@@ -358,5 +350,3 @@ class Client:
         service_account_name = f"{service_account_name}-role"
 
         gcp_region_client.remove_role(service_account_name)
-
-        print("service account removed")

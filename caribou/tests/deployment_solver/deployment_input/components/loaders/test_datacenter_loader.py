@@ -50,7 +50,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 3.92e-06)
 
         # Test default value
-        result = self.loader.get_average_memory_power("unknown-region")
+        result = self.loader.get_average_memory_power("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_AVERAGE_MEMORY_POWER_DEFAULT)
 
     def test_get_pue(self):
@@ -58,7 +58,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 1.11)
 
         # Test default value
-        result = self.loader.get_pue("unknown-region")
+        result = self.loader.get_pue("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_PUE_DEFAULT)
 
     def test_get_cfe(self):
@@ -66,7 +66,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 0.0)
 
         # Test default value
-        result = self.loader.get_cfe("unknown-region")
+        result = self.loader.get_cfe("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_CFE_DEFAULT)
 
     def test_get_max_cpu_power(self):
@@ -74,7 +74,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 0.0035)
 
         # Test default value
-        result = self.loader.get_max_cpu_power("unknown-region")
+        result = self.loader.get_max_cpu_power("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_MAX_CPU_POWER_DEFAULT)
 
     def test_get_min_cpu_power(self):
@@ -82,7 +82,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 0.00074)
 
         # Test default value
-        result = self.loader.get_min_cpu_power("unknown-region")
+        result = self.loader.get_min_cpu_power("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_MIN_CPU_POWER_DEFAULT)
 
     def test_get_sns_request_cost(self):
@@ -90,7 +90,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 5e-07)
 
         # Test default value
-        result = self.loader.get_sns_request_cost("unknown-region")
+        result = self.loader.get_sns_request_cost("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_SNS_REQUEST_COST_DEFAULT)
 
     def test_get_dynamodb_read_write_cost(self):
@@ -98,7 +98,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, (2.75e-07, 1.375e-06))
 
         # Test default value
-        result = self.loader.get_dynamodb_read_write_cost("unknown-region")
+        result = self.loader.get_dynamodb_read_write_cost("unknown-region-1")
         self.assertEqual(result, (SOLVER_INPUT_DYNAMODB_READ_COST_DEFAULT, SOLVER_INPUT_DYNAMODB_WRITE_COST_DEFAULT))
 
     def test_get_ecr_storage_cost(self):
@@ -106,7 +106,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 0.1)
 
         # Test default value
-        result = self.loader.get_ecr_storage_cost("unknown-region")
+        result = self.loader.get_ecr_storage_cost("unknown-region-1")
         self.assertEqual(result, SOLVER_INPUT_ECR_MONTHLY_STORAGE_COST_DEFAULT)
 
     def test_get_compute_cost(self):
@@ -114,7 +114,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 1.33334e-05)
 
         # Test default value
-        result = self.loader.get_compute_cost("unknown-region", "arm64")
+        result = self.loader.get_compute_cost("unknown-region-1", "arm64")
         self.assertEqual(result, SOLVER_INPUT_COMPUTE_COST_DEFAULT)
 
     def test_get_invocation_cost(self):
@@ -122,7 +122,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 2e-07)
 
         # Test default value
-        result = self.loader.get_invocation_cost("unknown-region", "arm64")
+        result = self.loader.get_invocation_cost("unknown-region-1", "arm64")
         self.assertEqual(result, SOLVER_INPUT_INVOCATION_COST_DEFAULT)
 
     def test_get_transmission_cost(self):
@@ -133,7 +133,7 @@ class TestDatacenterLoader(unittest.TestCase):
         self.assertEqual(result, 0.09)
 
         # Test default value
-        result = self.loader.get_transmission_cost("unknown-region", True)
+        result = self.loader.get_transmission_cost("unknown-region-1", True)
         self.assertEqual(result, SOLVER_INPUT_TRANSMISSION_COST_DEFAULT)
 
     @patch.object(DatacenterLoader, "_retrieve_region_data")

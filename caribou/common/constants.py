@@ -96,7 +96,7 @@ SOLVER_INPUT_GCP_MIN_CPU_POWER_DEFAULT = 0.00071
 SOLVER_INPUT_GCP_MAX_CPU_POWER_DEFAULT = 0.00426
 
 SOLVER_INPUT_SNS_REQUEST_COST_DEFAULT = 0.50 / 1000000  # 0.50 USD per 1 million requests (At Ohio region)
-SOLVER_INPUT_GCP_PUBSUB_REQUEST_COST_DEFAULT = 50 / (1024 ** 3) # 50 USD per TB, minimum size = 1KB
+SOLVER_INPUT_GCP_PUBSUB_REQUEST_COST_DEFAULT = 50 / (1024**3)  # 50 USD per TB, minimum size = 1KB
 
 SOLVER_INPUT_DYNAMODB_READ_COST_DEFAULT = 0.25 / 1000000  # 0.25 USD per 1 million read request unit (At Ohio region)
 SOLVER_INPUT_DYNAMODB_WRITE_COST_DEFAULT = 1.25 / 1000000  # 1.25 USD per 1 million write request unit (At Ohio region)
@@ -159,14 +159,14 @@ TIME_FORMAT_DAYS = "%Y-%m-%d%z"
 
 # Log-Syncer parameters
 ## Forgetting factors
-FORGETTING_TIME_DAYS = 5  # 30 days
+FORGETTING_TIME_DAYS = 30  # 30 days
 FORGETTING_NUMBER = 5000  # 5000 invocations
 KEEP_ALIVE_DATA_COUNT = 10  # Keep sample it is part of any of the 10 samples for any execution or transmission
-MIN_TIME_BETWEEN_SYNC = 15  # In Minutes
+MIN_TIME_BETWEEN_SYNC = 1  # In Minutes
 
 ## Grace period for the log-syncer
 ## Used as lambda insights can be delayed
-BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD = 15  # In minutes
+BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD = 1  # In minutes
 
 BUFFER_GCP_METRICS_GRACE_PERIOD = 2  # In minutes
 
@@ -183,7 +183,7 @@ MAX_WORKERS = 1
 
 ## Orchastration transfer size limitation
 MAX_TRANSFER_SIZE = 256000  # In bytes
-MAX_GCP_TRANSFER_SIZE = 10 * (1024**2) # 10 MB in bytes
+MAX_GCP_TRANSFER_SIZE = 10 * (1024**2)  # 10 MB in bytes
 
 
 # Caribou Go Path

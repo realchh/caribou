@@ -137,6 +137,15 @@ Disclaimer: GCP Support is currently experimental. Use it at your own risk.
 
 To run the framework, you first need to setup a GCP project. 
 
+## Required GCP APIs
+
+- Cloud Run
+- Firestore
+- Cloud Storage
+- Cloud Scheduler
+- Artifact Registry
+- 
+
 ## Other dependencies
 
 We are using [gcrane](https://cloud.google.com/artifact-registry/docs/docker/copy-images#gcrane-local

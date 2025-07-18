@@ -411,7 +411,6 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
     def _retrieve_gcp_available_architectures(self) -> list[str]:
         available_architectures = []
-        available_architectures.append("arm64")
         available_architectures.append("x86_64")
         return available_architectures
 
@@ -487,7 +486,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             sns_cost = 40
 
             result_sns_cost_dict[region_key] = {
-                "request_cost": sns_cost / 1024 * 1024 * 1024,
+                "request_cost": sns_cost / (1024 * 1024 * 1024),
                 "unit": "USD/requests",
             }
 
@@ -520,7 +519,6 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             "il-central-1": 1.31,
         }
         result_pue_dict = {}
-
 
         for region_key in available_regions:
             if ":" not in region_key:
@@ -572,18 +570,15 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         }
         result_pue_dict = {}
 
-
         for region_key in available_regions:
             if ":" not in region_key:
                 raise ValueError(f"Invalid region key {region_key}")
 
             region_code = region_key.split(":")[1]
 
+            gcp_default_pue = 1.09
             # Check if the region code is in the dictionary
-            if region_code in exact_region_codes:
-                pue = exact_region_codes[region_code]
-            else:
-                pue = 1.09
+            pue = exact_region_codes.get(region_code, gcp_default_pue)
 
             result_pue_dict[region_key] = pue
 
@@ -776,7 +771,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         artifact_registry_cost_dict: dict[str, dict[str, float | str]] = defaultdict(
             lambda: {
-                "storage_cost": 0.0,
+                "storage_cost": 0.1,
                 "unit": "USD",
             }
         )
@@ -788,7 +783,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                 if region_code == "global":
                     for region in available_region_code.keys():
                         artifact_registry_cost_dict[available_region_code[region]] = {
-                            "storage_cost": 0.0,
+                            "storage_cost": 0.1,
                             "unit": "USD",
                         }
 
@@ -796,7 +791,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
                     continue
                 else:
                     artifact_registry_cost_dict[available_region_code[region_code]] = {
-                        "storage_cost": 0.0,
+                        "storage_cost": 0.1,
                         "unit": "USD",
                     }
 

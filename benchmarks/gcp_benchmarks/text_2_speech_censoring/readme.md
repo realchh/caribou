@@ -3,12 +3,12 @@
 Original source: [https://github.com/SimonEismann/FunctionsAndWorkflows](https://github.com/SimonEismann/FunctionsAndWorkflows) (the original repository's license file is included in this directory)
 
 This benchmark requires access to the Google Cloud Storage bucket named `caribou-text-2-speech-censoring`.
-Alternatively, the user may change the S3 bucket name and region in `app.py`, by changing the values of `gcp_bucket_name` to the desired bucket.
+Alternatively, the user may change the Google Cloud Storage bucket name and region in `app.py`, by changing the values of `gcp_bucket_name` to the desired bucket.
 
 There needs to be an text file in the bucket, for example `text_file.txt`, in a folder called `input`.
 
-This benchmark allow for usage of either `AWS Polly` or `Google Text-To-Speech` which
-can be configured with an input argument `t2s_service` of either `polly` or `gtts`.
+This benchmark allow for usage of `Google Text-To-Speech` which
+can be configured with an input argument `t2s_service` of `gtts`.
 If this is not set, this benchark defaults to using `Google Text-To-Speech`.
 
 This benchmark allow for a custom output folder name which can be configured with

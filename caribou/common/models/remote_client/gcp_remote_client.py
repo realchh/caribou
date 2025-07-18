@@ -8,10 +8,13 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 from typing import Any, Optional
 
+import google.auth
+import google.auth.transport.requests
+import requests
 from google.api_core import exceptions as google_api_exceptions
 from google.api_core.client_options import ClientOptions
 from google.auth import default as google_auth_default
-from google.cloud import (  # scheduler_v1,
+from google.cloud import (
     artifactregistry_v1,
     eventarc_v1,
     firestore,
@@ -21,6 +24,7 @@ from google.cloud import (  # scheduler_v1,
     pubsub_v1,
     resourcemanager_v3,
     run_v2,
+    scheduler_v1,
     storage,
 )
 from google.cloud.iam_admin_v1 import IAMClient
@@ -30,7 +34,7 @@ from google.protobuf import field_mask_pb2, timestamp_pb2
 from google.pubsub_v1 import PushConfig
 
 from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
-    BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD,
+    BUFFER_GCP_METRICS_GRACE_PERIOD,
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
     FIRESTORE_TTL_FIELD_NAME,
@@ -40,8 +44,12 @@ from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
     SYNC_TABLE_TTL,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
-from caribou.common.utils import compress_json_str, decompress_json_str, get_country_abbreviation, \
-    get_region_abbreviation
+from caribou.common.utils import (
+    compress_json_str,
+    decompress_json_str,
+    get_country_abbreviation,
+    get_region_abbreviation,
+)
 from caribou.deployment.common.deploy.models.resource import Resource
 
 logger = logging.getLogger(__name__)
@@ -90,6 +98,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
         self._logging_client = logging_v2.Client(credentials=self._credentials)
         self._monitoring_client = monitoring_v3.MetricServiceClient(credentials=self._credentials)
+        self._scheduling_client = scheduler_v1.CloudSchedulerClient(credentials=self._credentials)
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
@@ -181,7 +190,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def service_account_exists(self, resource: Resource) -> bool:
         try:
             client = self._iam_admin_client
-            print("getting service account:", resource.name)
             response = client.get_service_account(name=resource.name)
             return response is not None
         except google_api_exceptions.NotFound:
@@ -250,8 +258,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     }
                 )
                 admin_client.update_field(request=request)
-
-            print(f"table {table} created on database (default)")
 
     def _ensure_firestore_database_exists(self, database_name: str) -> bool:
         client = self._firestore_admin_client
@@ -333,15 +339,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         cpu: float | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
-        print(f"creating function: {function_name}, role identifier: {role_identifier}, runtime: {runtime}, handler: {handler}")
         image_uri: str
         deployed_image_uri = self._get_deployed_image_uri(function_name)
         if len(deployed_image_uri) > 0:
-            print("image uri exists: ", deployed_image_uri)
             image_uri = self._copy_image_to_region(deployed_image_uri)
-            print("copied existing image uri to: ", image_uri)
         else:
-            print("image uri does not exist")
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function creation")
 
@@ -366,11 +368,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
-        print("role identifier: ", role_identifier)
         if cpu is None:
             cpu = max(1.0, memory_size // 1024)
 
-        print("creating cloud run service url for service: ", function_name, " cpu count:", cpu)
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
@@ -393,8 +393,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         timeout_s: int,
         service_account_email: str,
     ) -> str:
-        print(service_name)
-
         client = self._run_client
         parent = f"projects/{self._project_id}/locations/{self._region}"
         full_name = f"{parent}/services/{service_name}"
@@ -419,25 +417,19 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         try:
             op = client.create_service(parent=parent, service=svc, service_id=service_name)
-            print(f"Cloud Run service {service_name} created successfully.")
         except google_api_exceptions.AlreadyExists:
             existing = client.get_service(name=full_name)
             existing.template = template
             mask = field_mask_pb2.FieldMask(paths=["template"])  # pylint: disable=maybe-no-member
             op = client.update_service(service=existing, update_mask=mask)
-            print(f"Cloud Run service {service_name} updated successfully.")
 
         op.result()
         return client.get_service(name=full_name).uri
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
-        print(f"storing deployed image uri for function: {function_name}")
         workflow_instance_id = "-".join(function_name.split("-")[0:5])
-        print(f"workflow instance id: {workflow_instance_id}")
         function_name_simple = function_name[len(workflow_instance_id) + 1 :]
-        print(f"function name simple: {function_name_simple}")
         function_name_simple = "-".join(function_name_simple.split("-")[0:3])
-        print(f"function name simple: {function_name_simple}")
 
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
@@ -453,9 +445,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         original_image_name = parts[-1]
         original_region = "-".join(original_image_name.split("-")[8:10])
 
-        print("original region", original_region)
-
         new_region = self._region
+
+        if new_region is None:
+            raise RuntimeError("No remote client region specified. This should be impossible")
 
         new_region_country = new_region.split("-")[0]
         new_region_country = get_country_abbreviation(new_region_country)
@@ -463,7 +456,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         new_region_region = get_region_abbreviation(new_region_region)
 
         new_region = f"{new_region_country}-{new_region_region}"
-        print("new region", new_region)
         new_image_name = original_image_name.replace(original_region, new_region)
 
         repo_id = "caribou"  # Base artifact registry repo to hold the docker images used for deployment
@@ -617,9 +609,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         image_uri: str
         deployed_image_uri = self._get_deployed_image_uri(function_name)
         if len(deployed_image_uri) > 0:
-            print("image uri exists: ", deployed_image_uri)
             image_uri = self._copy_image_to_region(deployed_image_uri)
-            print("copied existing image uri to: ", image_uri)
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function update")
@@ -662,7 +652,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             response = client.delete_service(name=full_path)
             response.result()
         except google_api_exceptions.NotFound as e:
-            print(f"Function {function_name} not found (maybe the function is already deleted): {e}")
+            logger.info("Function %s not found (maybe the function is already deleted): %s", function_name, e)
 
     def create_role(self, role_name: str, policy: str, trust_policy: dict | None = None) -> str:
         policy_list = json.loads(policy)
@@ -715,7 +705,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         return sa
 
     def update_role(self, role_name: str, policy: str, trust_policy: dict | None = None) -> str:
-        print("role name: ", role_name)
         policy_list = json.loads(policy)
         if "roles" not in policy_list:
             raise ValueError("Policy must contain 'roles'")
@@ -828,18 +817,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
             client.set_iam_policy(request={"resource": topic_path, "policy": policy})
         except google_api_exceptions.NotFound as e:
-            print(f"Topic {topic_name} not found. Cannot set IAM policy: {e}")
+            logger.exception("Topic %s not found. Cannot set IAM policy: %s", topic_name, e)
         except google_api_exceptions.GoogleAPICallError as e:
-            print(f"Failed to set IAM policy for topic {topic_path}: {e}")
+            logger.exception("Failed to set IAM policy for topic %s: %s", topic_path, e)
 
         return response.name
 
     def create_pubsub_subscription(
-        self, topic: str,
-            subscription_name: str,
-            push_endpoint: str,
-            service_account_name: str,
-            timeout: int
+        self, topic: str, subscription_name: str, push_endpoint: str, service_account_name: str, timeout: int
     ) -> str:
         client = self._pubsub_subscriber_client
 
@@ -882,6 +867,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
         client = self._pubsub_publisher_client
         response = client.publish(topic=identifier, data=compress_json_str(message))
+        # for some reason it needs this line so the message gets sent to pub/sub
         print(response.result())
 
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
@@ -907,7 +893,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 doc.set({"value": value})
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Could not update value in table {table_name} for key {key}: {e}") from e
-
 
     def set_value_in_table_column(
         self, table_name: str, key: str, column_type_value: list[tuple[str, str, str]]
@@ -982,7 +967,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         try:
             document.delete()
         except google_api_exceptions.NotFound as e:
-            print(f"Key {key} not found: {e}")
+            logger.info("key %s not found: %s", key, e)
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Could not delete key {key} from table {table_name}: {e}") from e
 
@@ -1020,7 +1005,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         try:
             blob.delete()
         except google_api_exceptions.NotFound as e:
-            print(f"Key {key} not found: {e}")
+            logger.info("key %s not found: %s", key, e)
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Could not delete resource {key} from database: {e}") from e
 
@@ -1046,17 +1031,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         if time_start:
             query += f' AND timestamp>="{time_start}"'
 
-        print(time_start)
-
         if time_end:
             query += f' AND timestamp<="{time_end}"'
-
-        print(f"Executing log query for {service_name}: {query}")
 
         client = self._logging_client
         entries = client.list_entries(filter_=query, order_by=logging_v2.DESCENDING)
 
-        # print("entries:", entries)
         result = []
         for entry in entries:
             json_result = json.dumps(entry.to_api_repr())
@@ -1083,22 +1063,18 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     ) -> float | None:
         project_name = f"projects/{self._project_id}"
 
-        filter_string = (
-            f'metric.type="{metric_type}" AND '
-            f'resource.labels.revision_name="{revision_name}"'
-        )
+        filter_string = f'metric.type="{metric_type}" AND ' f'resource.labels.revision_name="{revision_name}"'
 
         count_filter_string = (
             'metric.type="run.googleapis.com/container/instance_count" AND '
             f'resource.labels.revision_name="{revision_name}"'
         )
 
-        print(f"Executing metric query: {filter_string}")
-
-        start_timestamp = timestamp_pb2.Timestamp()
-        start_timestamp.FromDatetime(dt = start)
-        end_timestamp = timestamp_pb2.Timestamp()
-        end_timestamp.FromDatetime(dt = end)
+        start = start - timedelta(minutes=BUFFER_GCP_METRICS_GRACE_PERIOD)
+        start_timestamp = timestamp_pb2.Timestamp()  # pylint: disable=maybe-no-member
+        start_timestamp.FromDatetime(dt=start)
+        end_timestamp = timestamp_pb2.Timestamp()  # pylint: disable=maybe-no-member
+        end_timestamp.FromDatetime(dt=end)
 
         interval = monitoring_v3.types.TimeInterval(start_time=start_timestamp, end_time=end_timestamp)
 
@@ -1143,22 +1119,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 if not series.points:
                     return None
 
-                i = 0
                 max_value = 0.0
                 for point, container_count in zip(series.points, count_series.points):
-                    print(f"point[{i}]: point: {point.value.double_value}, count: {container_count.value.int64_value}")
                     value = point.value.double_value / max(container_count.value.int64_value, 1)
-                    if value >= max_value:
-                        max_value = value
-                    i += 1
-                    # if value != 0.0:
-                    #     return value
+                    max_value = max(max_value, value)
 
-                print(f"max = {max_value}")
                 return max_value
 
         except google_api_exceptions.GoogleAPICallError as e:
-            logger.warning(f"Failed to query metric '{metric_type}': {e}")
+            logger.warning("Failed to query metric '%s': %s", metric_type, e)
 
         return None
 
@@ -1195,7 +1164,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         full_package_name = self._artifact_registry_client.package_path(
             project=self._project_id, location=self._region, repository=repo_id, package=package_name
         )
-        print(f"Removing package {full_package_name}")
         self._artifact_registry_client.delete_package(name=full_package_name)
 
     def artifact_registry_repository_exists(self, resource: Resource) -> bool:
@@ -1239,8 +1207,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         image_name = f"{function_name.lower()}:latest"
         self._build_docker_image(tmpdirname, image_name)
 
-        # Step 4: Upload the Image to ECR
+        # Step 4: Upload the Image to Artifact Registry
         image_uri = self._upload_image_to_artifact_registry(image_name)
+
+        # Step 5: Create the Cloud Run Service
         self._create_framework_cloud_run_function(
             function_name, image_uri, role_arn, timeout, memory_size, ephemeral_storage
         )
@@ -1249,12 +1219,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         # Create ENV statements for each environment variable
         env_statements = "\n".join([f'ENV {key}="{value}"' for key, value in env_vars.items()])
 
+        source_file = handler.split(".")[0] + ".py"
+        target_function = handler.split(".")[-1]
+
         return f"""
         # Stage 1: Base image with Python 3.12 slim for installing Go
         FROM python:3.12-slim AS builder
 
         # Install essential packages for downloading and compiling Go
         RUN apt-get update && apt-get install -y curl tar gcc
+        
+        RUN apt-get update && \
+            apt-get install -y --no-install-recommends \
+                libsqlite3-0 \
+            && rm -rf /var/lib/apt/lists/*
 
         # Download and extract Go 1.22.6
         RUN curl -LO https://go.dev/dl/go1.22.6.linux-amd64.tar.gz \
@@ -1281,9 +1259,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         # Copy the compiled Go application from the builder stage
         COPY --from=builder caribou-go caribou-go
 
-        # Copy Go and Crane binaries from the builder stage
+        # Copy Go and GCrane binaries from the builder stage
         COPY --from=builder /usr/local/go /usr/local/go
-        COPY --from=builder /usr/local/bin/crane /usr/local/bin/crane
+        COPY --from=builder /usr/local/bin/gcrane /usr/local/bin/gcrane
 
         # Set up PATH and GOROOT environment variables
         ENV PATH="/usr/local/go/bin:/usr/local/bin:$PATH"
@@ -1304,30 +1282,51 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         # Declare environment variables
         {env_statements}
+        ENV CARIBOU_DEFAULT_PROVIDER gcp
 
         # Copy application code
         COPY app.py ./
 
         # Command to run the application
-        CMD ["{handler}"]
+        CMD ["functions-framework", \
+        "--source", "{source_file}", \
+        "--target", "{target_function}", \
+        "--signature-type", "http"]
         """
 
     def _create_framework_cloud_run_function(
         self,
         function_name: str,
-        service_account_email: str,
         image_uri: str,
+        service_account_email: str,
         timeout: int,
         memory_size: int,
-        cpu: float = 1.0,
+        cpu: float | None = None,
+        ephemeral_storage: int = 0,
         env: dict[str, str] | None = None,
     ) -> str:
+        # Ephemeral storage uses file system in memory
+        # https://cloud.google.com/run/docs/container-contract#filesystem
+        memory_and_storage = memory_size + ephemeral_storage
+        if memory_and_storage > 32768:
+            raise ValueError(
+                f"Total amount of memory ({memory_size} MB) + ephemeral storage ({ephemeral_storage} MB)"
+                f" exceeds 32,768 MB (current size = {memory_and_storage} MB)"
+            )
+
+        # CPU and Memory limits from:
+        # https://cloud.google.com/run/docs/configuring/services/memory-limits#cpu-minimum
+        # https://cloud.google.com/run/docs/configuring/services/cpu
+        # this part of code should not be reached, but it is here for safeguarding purposes.
+        if cpu is None:
+            cpu = max(memory_and_storage // 1024, 8)
+
         url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
             env=env or {},
             cpu=cpu,
-            memory_mib=memory_size,
+            memory_mib=memory_and_storage,
             timeout_s=timeout if timeout >= 1 else 0,
             service_account_email=service_account_email,
         )
@@ -1335,69 +1334,97 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         print(f"Caribou Lambda Framework remote cli function {function_name}" f" created successfully, with url: {url}")
         return url
 
-    # def get_timer_rule_schedule_expression(self, rule_name: str) -> Optional[str]:
-    #     """Retrieve the schedule expression of a timer rule if it exist."""
-    #     return None
-    #
-    # def remove_timer_rule(self, lambda_function_name: str, rule_name: str) -> None:
-    #     """Remove the EventBridge rule and its associated targets."""
-    #     print("unfinished")
-    #
-    # def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
-    #     """Check if a specific permission exists in the Lambda function's policy based on the StatementId."""
-    #     return False
-    #
-    # def create_timer_rule(
-    #     self, lambda_function_name: str, schedule_expression: str, rule_name: str, event_payload: str
-    # ) -> None:
-    #     print("unfinished")
-    #
-    # def invoke_remote_framework_internal_action(self, action_type: str, action_events: dict[str, Any]) -> None:
-    #     payload = {
-    #         "action": "internal_action",
-    #         "type": action_type,
-    #         "event": action_events,
-    #     }
-    #
-    #     self.invoke_remote_framework_with_payload(payload, invocation_type="Event")
-    #
-    # def invoke_remote_framework_with_payload(self, payload: dict[str, Any], invocation_type: str = "Event") -> None:
-    #     Get the boto3 lambda client
-    #     lambda_client = self._client("lambda")
-    #     remote_framework_cli_name = REMOTE_CARIBOU_CLI_FUNCTION_NAME
-    #
-    #     # Invoke the lambda function with the payload
-    #     lambda_client.invoke(
-    #         FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
-    #     )
-    #     print("unfinished")
+    def get_timer_rule_schedule_expression(self, rule_name: str) -> Optional[str]:
+        """Retrieves the schedule expression of a Cloud Scheduler job."""
+        job_path = self._scheduling_client.job_path(self._project_id, self._region, rule_name)
+        try:
+            job = self._scheduling_client.get_job(name=job_path)
+            return job.schedule
+        except google_api_exceptions.NotFound:
+            logger.info("Timer rule %s not found", rule_name)
+            return None
+        except google_api_exceptions.GoogleAPICallError as e:
+            logger.info("Could not get timer rule %s: %s", rule_name, e)
+            return None
 
+    def remove_timer_rule(self, lambda_function_name: str, rule_name: str) -> None:
+        """Remove the Cloud Scheduler job."""
+        job_path = self._scheduling_client.job_path(self._project_id, self._region, rule_name)
+        try:
+            self._scheduling_client.delete_job(name=job_path)
+            logger.info("Cloud Scheduler job %s deleted successfully", rule_name)
+        except google_api_exceptions.NotFound:
+            logger.info("Cloud Scheduler job %s not found. Maybe the rule is already deleted.", rule_name)
+        except google_api_exceptions.GoogleAPICallError as e:
+            logger.error("Error deleting the Cloud Scheduler job %s: %s", rule_name, e)
 
-# if __name__ == "__main__":
-    # gcp_remote_client = GCPRemoteClient(region="us-west1")
-    # start_time = datetime.fromisoformat("2025-07-07T12:33:45.266-07:00")
-    # end_time = datetime.fromisoformat("2025-07-07T12:35:45.266-07:00")
-    # function_instance = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722"
-    # logs = gcp_remote_client.get_logs_between(function_instance, start_time, end_time)
-    # print("done:")
+    def create_timer_rule(
+        self, lambda_function_name: str, schedule_expression: str, rule_name: str, event_payload: str
+    ) -> None:
+        """
+        Creates a Cloud Scheduler job that publishes a message to a Pub/Sub topic.
+        This topic is assumed to be the one that triggers the target Cloud Run service.
+        """
+        job_path = self._scheduling_client.job_path(self._project_id, self._region, rule_name)
+        topic_id = f"{lambda_function_name}_messaging_topic"
+        topic_path = self._pubsub_publisher_client.topic_path(self._project_id, topic_id)
 
-    # for log in logs:
-    #     # GCP: caribou logs have a jsonpayload.severity="CARIBOU".
-    #     # GCP report logs have a logName of "run.googleapis.com%2Frequests"
-    #     gcp_log = json.loads(log)
-    #     if gcp_log.get("jsonPayload", {}).get(
-    #         "severity", ""
-    #     ) == "CARIBOU" or "run.googleapis.com%2Frequests" in gcp_log.get("logName", ""):
-    #         print("log:", gcp_log)
-    #     else:
-    #         print("no:", gcp_log)
-    # revision_name = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722-00001-b77"
-    # instance_id = "dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722-00001"
-    # memory_utilization = gcp_remote_client.query_metric(
-    #     revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
-    # )
-    # service_object = gcp_remote_client.get_cloud_run_service_object("dna-tion-0-0-1-visu-lize-gcp-us-ea1-5b0ed9aa6722")
-    # print(service_object)
-    # print(gcp_remote_client._get_deployed_image_uri("fem-tion-0-0-2-solv-fem-gcp-us-ea1-9521c346e2a4"))
-    # print(f"Memory utilization: {memory_utilization}")
-    # gcp_remote_client._copy_image_to_region("us-east1-docker.pkg.dev/caribou-460422/caribou/map-duce-0-0-1-outp-ssor-gcp-us-ea1-c2db40c1ad44:latest")
+        pubsub_target = scheduler_v1.types.PubsubTarget(
+            {
+                "topic_name": topic_path,
+                "data": event_payload.encode("utf-8"),
+            }
+        )
+
+        job = scheduler_v1.Job(
+            {"name": job_path, "schedule": schedule_expression, "time_zone": "Etc/UTC", "pubsub_target": pubsub_target}
+        )
+
+        try:
+            self._scheduling_client.create_job(parent=f"projects/{self._project_id}/locations/{self._region}", job=job)
+            logger.info("Timer rule %s created successfully", rule_name)
+        except google_api_exceptions.AlreadyExists:
+            logger.info("Timer rule %s already exists, updating", rule_name)
+            self._scheduling_client.update_job(job=job)
+        except google_api_exceptions.GoogleAPICallError as e:
+            raise RuntimeError(f"Error creating timer rule {rule_name}: {e}") from e
+
+    def invoke_remote_framework_internal_action(self, action_type: str, action_events: dict[str, Any]) -> None:
+        payload = {
+            "action": "internal_action",
+            "type": action_type,
+            "event": action_events,
+        }
+
+        self.invoke_remote_framework_with_payload(payload)
+
+    def invoke_remote_framework_with_payload(
+        self, payload: dict[str, Any], invocation_type: str = "RequestResponse"
+    ) -> None:
+        """
+        Invokes the remote framework CLI (a Cloud Run service) via an authenticated HTTP request.
+        """
+        # Get the remote cli url
+        remote_cli_name = os.environ.get("REMOTE_CARIBOU_CLI_FUNCTION_NAME", "caribou-remote-cli")
+        service_path = self._run_client.service_path(self._project_id, self._region, remote_cli_name)
+        try:
+            service = self._run_client.get_service(name=service_path)
+            target_url = service.uri
+
+        except google_api_exceptions.NotFound as e:
+            raise RuntimeError(f"Remote CLI service '{remote_cli_name}' not found: e") from e
+
+        auth_req = google.auth.transport.requests.Request()
+        credentials = self._credentials
+        credentials.refresh(auth_req)
+
+        id_token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
+
+        headers = {"Authorization": f"Bearer {id_token}", "Content-Type": "application/json"}
+
+        try:
+            response = requests.post(target_url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            logger.info("Successfully invoked remote CLI. Status: %d", response.status_code)
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Failed to invoke remote CLI at {target_url}: {e}") from e

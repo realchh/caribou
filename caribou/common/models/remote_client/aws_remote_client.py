@@ -1108,7 +1108,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             # Check if its ResourceNotFoundException, which means the rule doesn't exist
             # We don't need to do anything in this case
             if not e.response["Error"]["Code"] == "ResourceNotFoundException":
-                print(f"Error removing the EventBridge rule {rule_name}: {e}")
+                print(f"Error getting the EventBridge rule {rule_name}: {e}")
 
             return None
 
