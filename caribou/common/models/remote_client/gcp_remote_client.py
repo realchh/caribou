@@ -34,12 +34,13 @@ from google.oauth2 import id_token, service_account  # pylint: disable=unused-im
 from google.protobuf import field_mask_pb2, timestamp_pb2
 from google.pubsub_v1 import PushConfig
 
-from caribou.common.constants import (  # REMOTE_CARIBOU_CLI_FUNCTION_NAME,
+from caribou.common.constants import (
     BUFFER_GCP_METRICS_GRACE_PERIOD,
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
     FIRESTORE_TTL_FIELD_NAME,
     GLOBAL_GCP_SYSTEM_REGION,
+    REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
     SYNC_TABLE_TTL,
@@ -190,11 +191,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def service_account_exists(self, resource: Resource) -> bool:
         try:
-            client = self._iam_admin_client
-            response = client.get_service_account(name=resource.name)
+            response = self.get_service_account(resource.name)
             return response is not None
-        except google_api_exceptions.NotFound:
-            return False
         except google_api_exceptions.GoogleAPICallError:
             return False
 
@@ -1191,6 +1189,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         zip_contents: bytes,
         tmpdirname: str,
         env_vars: dict,
+        cpu: int | None = None,
     ) -> None:
         # Step 1: Unzip the ZIP file
         zip_path = os.path.join(tmpdirname, "code.zip")
@@ -1213,7 +1212,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         # Step 5: Create the Cloud Run Service
         self._create_framework_cloud_run_function(
-            function_name, image_uri, role_arn, timeout, memory_size, ephemeral_storage
+            function_name, image_uri, role_arn, timeout, memory_size, cpu, ephemeral_storage
         )
 
     # TODO: check this
@@ -1246,7 +1245,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         # Download and install the crane tool
         RUN curl -sL "https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz" > go-containerregistry.tar.gz
-        RUN tar -zxvf go-containerregistry.tar.gz -C /usr/local/bin/ crane
+        RUN tar -zxvf go-containerregistry.tar.gz -C /usr/local/bin/ gcrane
 
         COPY caribou-go ./caribou-go
 
@@ -1270,7 +1269,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         ENV GOROOT=/usr/local/go
 
         # Install Poetry via pip
-        RUN pip3 install poetry
+        USER root
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            && pip3 install poetry \
+            && rm -rf /var/lib/apt/lists/*
 
         # Copy Python dependency management files
         COPY pyproject.toml poetry.lock ./
@@ -1407,7 +1410,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         Invokes the remote framework CLI (a Cloud Run service) via an authenticated HTTP request.
         """
         # Get the remote cli url
-        remote_cli_name = os.environ.get("REMOTE_CARIBOU_CLI_FUNCTION_NAME", "caribou-remote-cli")
+        remote_cli_name = os.environ.get("REMOTE_CARIBOU_CLI_FUNCTION_NAME", REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME)
         service_path = self._run_client.service_path(self._project_id, self._region, remote_cli_name)
         try:
             service = self._run_client.get_service(name=service_path)

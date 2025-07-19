@@ -497,6 +497,7 @@ class IntegrationTestRemoteClient(RemoteClient):  # pylint: disable=too-many-pub
         zip_contents: bytes,
         tmpdirname: str,
         env_vars: dict,
+        cpu: int | None = None,
     ) -> None:
         pass
 

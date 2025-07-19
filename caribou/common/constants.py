@@ -37,7 +37,9 @@ GLOBAL_GCP_SYSTEM_REGION = "us-east1"
 
 # Remote CLI Information (Eg. Function, repo name, policy name, etc.)
 REMOTE_CARIBOU_CLI_FUNCTION_NAME = "caribou_cli"
+REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME = "caribou-cli"
 REMOTE_CARIBOU_CLI_IAM_POLICY_NAME = "caribou_deployment_policy"
+REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME = "caribou-deployment-policy"
 
 # Integration Test System Region
 INTEGRATION_TEST_SYSTEM_REGION = "rivendell"

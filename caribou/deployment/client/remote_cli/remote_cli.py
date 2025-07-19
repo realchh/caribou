@@ -10,6 +10,8 @@ from caribou.common.constants import (
     GLOBAL_GCP_SYSTEM_REGION,
     GLOBAL_SYSTEM_REGION,
     REMOTE_CARIBOU_CLI_FUNCTION_NAME,
+    REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
+    REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME,
     REMOTE_CARIBOU_CLI_IAM_POLICY_NAME,
 )
 from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
@@ -65,27 +67,31 @@ def remove_gcp_remote_framework() -> None:
     remove_gcp_timers(get_all_available_timed_cli_functions(), verbose=verbose_remove_timers)
 
     if gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_IAM_POLICY_NAME, "service_account")
+        Resource(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME, "service_account")
     ):  # For service account
-        print(f"Deleting service account {REMOTE_CARIBOU_CLI_IAM_POLICY_NAME}")
-        gcp_remote_client.remove_role(REMOTE_CARIBOU_CLI_IAM_POLICY_NAME)
+        print(f"Deleting service account {REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME}")
+        gcp_remote_client.remove_role(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME)
 
     if gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_FUNCTION_NAME, "cloud_run_service")
+        Resource(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, "cloud_run_service")
     ):  # For cloud run service
-        print(f"Deleting (Remote CLI) cloud run service {REMOTE_CARIBOU_CLI_FUNCTION_NAME}")
-        gcp_remote_client.remove_function(REMOTE_CARIBOU_CLI_FUNCTION_NAME)
+        print(f"Deleting (Remote CLI) cloud run service {REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}")
+        gcp_remote_client.remove_function(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME)
 
     # Remove the deployed artifact registry repository if it exists
-    if gcp_remote_client.resource_exists(Resource(REMOTE_CARIBOU_CLI_FUNCTION_NAME, "artifact_registry_repository")):
-        print(f"Removing artifact registry repository {REMOTE_CARIBOU_CLI_FUNCTION_NAME}")
-        gcp_remote_client.remove_artifact_registry_repository(REMOTE_CARIBOU_CLI_FUNCTION_NAME)
+    if gcp_remote_client.resource_exists(
+        Resource(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, "artifact_registry_repository")
+    ):
+        print(f"Removing artifact registry repository {REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}")
+        gcp_remote_client.remove_artifact_registry_repository(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME)
 
 
-def deploy_remote_framework(project_dir: str, timeout: int, memory_size: int, ephemeral_storage: int) -> None:
+def deploy_remote_framework(
+    project_dir: str, timeout: int, memory_size: int, ephemeral_storage: int, cpu: int | None = None
+) -> None:
     provider = os.getenv("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
     if provider == Provider.GCP.value:
-        deploy_gcp_remote_framework(project_dir, timeout, memory_size, ephemeral_storage)
+        deploy_gcp_remote_framework(project_dir, timeout, memory_size, ephemeral_storage, cpu)
     else:
         deploy_aws_remote_framework(project_dir, timeout, memory_size, ephemeral_storage)
 
@@ -146,9 +152,11 @@ def deploy_aws_remote_framework(project_dir: str, timeout: int, memory_size: int
         )
 
 
-def deploy_gcp_remote_framework(project_dir: str, timeout: int, memory_size: int, ephemeral_storage: int) -> None:
+def deploy_gcp_remote_framework(
+    project_dir: str, timeout: int, memory_size: int, ephemeral_storage: int, cpu: int | None = None
+) -> None:
     print(f"Deploying framework to GCP in {project_dir}")
-    gcp_remote_client = GCPRemoteClient(GLOBAL_GCP_SYSTEM_REGION)
+    gcp_remote_client = GCPRemoteClient(region=GLOBAL_GCP_SYSTEM_REGION)
 
     handler = "app.caribou_cli"
 
@@ -159,25 +167,26 @@ def deploy_gcp_remote_framework(project_dir: str, timeout: int, memory_size: int
 
     # Delete role if exists
     if gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_IAM_POLICY_NAME, "service_account")
+        Resource(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME, "service_account")
     ):  # For service_account
-        print(f"Deleting service account {REMOTE_CARIBOU_CLI_IAM_POLICY_NAME}")
-        gcp_remote_client.remove_role(REMOTE_CARIBOU_CLI_IAM_POLICY_NAME)
+        print(f"Deleting service account {REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME}")
+        gcp_remote_client.remove_role(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME)
 
     # Create a role
-    service_account_email = gcp_remote_client.create_role("caribou_deployment_policy", iam_policies_content, None)
+    service_account_email = gcp_remote_client.get_service_account("caribou-deployment-policy")
+    service_account_email = gcp_remote_client.create_role("caribou-deployment-policy", iam_policies_content, None)
 
     # Delete remote cli if exists.
     if gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_FUNCTION_NAME, "cloud_run_service")
+        Resource(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, "cloud_run_service")
     ):  # For cloud run service
-        print(f"Deleting (Remote CLI) cloud run service {REMOTE_CARIBOU_CLI_FUNCTION_NAME}")
-        gcp_remote_client.remove_function(REMOTE_CARIBOU_CLI_FUNCTION_NAME)
+        print(f"Deleting (Remote CLI) cloud run service {REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}")
+        gcp_remote_client.remove_function(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME)
 
     with tempfile.TemporaryDirectory() as tmpdirname:
         # Create lambda function
         ## First zip the code content
-        print(f"Creating deployment package for {REMOTE_CARIBOU_CLI_FUNCTION_NAME}")
+        print(f"Creating deployment package for {REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}")
         deployment_packager_config: Config = Config({}, None)
         deployment_packager: DeploymentPackager = DeploymentPackager(deployment_packager_config)
         zip_path = deployment_packager.create_framework_package(project_dir, tmpdirname)
@@ -192,7 +201,7 @@ def deploy_gcp_remote_framework(project_dir: str, timeout: int, memory_size: int
 
         # Deploy to GCP
         gcp_remote_client.deploy_remote_cli(
-            REMOTE_CARIBOU_CLI_FUNCTION_NAME,
+            REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
             handler,
             service_account_email,
             timeout,
@@ -201,6 +210,7 @@ def deploy_gcp_remote_framework(project_dir: str, timeout: int, memory_size: int
             zip_contents,
             tmpdirname,
             env_vars,
+            cpu,
         )
 
 
@@ -333,21 +343,21 @@ def is_gcp_framework_deployed(
     gcp_remote_client: GCPRemoteClient = GCPRemoteClient(region=GLOBAL_GCP_SYSTEM_REGION), verbose: bool = True
 ) -> bool:
     if not gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_IAM_POLICY_NAME, "service_account")
+        Resource(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME, "service_account")
     ):  # For service account
         if verbose:
             print("Missing Remote Framework service account")
         return False
 
     if not gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_FUNCTION_NAME, "cloud_run_service")
+        Resource(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, "cloud_run_service")
     ):  # For cloud run service
         if verbose:
             print("Missing Remote Framework cloud run service")
         return False
 
     if not gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_FUNCTION_NAME, "artifact_registry_repository")
+        Resource(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, "artifact_registry_repository")
     ):  # For artifact registry repository
         if verbose:
             print("Missing Remote Framework artifact registry repository")
@@ -477,7 +487,7 @@ def setup_aws_timers(new_rules: list[tuple[str, str]]) -> None:
 
 def setup_gcp_timers(new_rules: list[tuple[str, str]]) -> None:
     """Create or update CloudWatch Event rules for Lambda functions."""
-    gcp_remote_client = GCPRemoteClient(GLOBAL_GCP_SYSTEM_REGION)
+    gcp_remote_client = GCPRemoteClient(region=GLOBAL_GCP_SYSTEM_REGION)
 
     # First check if the AWS framework is deployed
     if not is_gcp_framework_deployed(gcp_remote_client):
@@ -494,7 +504,7 @@ def setup_gcp_timers(new_rules: list[tuple[str, str]]) -> None:
 
         try:
             gcp_remote_client.create_timer_rule(
-                REMOTE_CARIBOU_CLI_FUNCTION_NAME, gcp_schedule, rule_name, event_payload
+                REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, gcp_schedule, rule_name, event_payload
             )
             print(f"Successfully created/updated GCP timer rule for {function_name} with schedule: {gcp_schedule}")
 
@@ -546,7 +556,7 @@ def remove_aws_timers(desired_remove_rules: list[str], verbose: bool = True) -> 
 
 def remove_gcp_timers(desired_remove_rules: list[str], verbose: bool = True) -> None:
     """Remove CloudWatch Event rules for Lambda functions."""
-    gcp_remote_client = GCPRemoteClient(GLOBAL_GCP_SYSTEM_REGION)
+    gcp_remote_client = GCPRemoteClient(region=GLOBAL_GCP_SYSTEM_REGION)
 
     # First check if the AWS framework is deployed
     if not is_gcp_framework_deployed(gcp_remote_client, verbose=verbose):
@@ -562,7 +572,7 @@ def remove_gcp_timers(desired_remove_rules: list[str], verbose: bool = True) -> 
 
         try:
             # Remove the timer rules
-            gcp_remote_client.remove_timer_rule(REMOTE_CARIBOU_CLI_FUNCTION_NAME, rule_name)
+            gcp_remote_client.remove_timer_rule(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME, rule_name)
 
             # Note the specific permission is not removed.
             # As other timers may still be using the function.
@@ -596,7 +606,6 @@ def report_gcp_timer_schedule_expression(function_name: str) -> Optional[str]:
     """
     GCP Helper for reporting the specification of a timer.
     """
-    gcp_remote_client = GCPRemoteClient(GLOBAL_SYSTEM_REGION)
+    gcp_remote_client = GCPRemoteClient(region=GLOBAL_GCP_SYSTEM_REGION)
     rule_name = _get_timer_rule_name(function_name)
-
     return gcp_remote_client.get_timer_rule_schedule_expression(rule_name)

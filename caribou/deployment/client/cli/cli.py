@@ -277,7 +277,11 @@ def deploy_remote_cli(
         ## Default 5120 == 5 GB (Should be enough for most use cases)
         ephemeral_storage_mb: int = _validate_parameter(ephemeral_storage, 5120, 512, 10240, "Ephemeral Storage", "MB")
 
-        deploy_remote_framework(project_dir, timeout_s, memory_mb, ephemeral_storage_mb)
+        # CPU Count (for GCP)
+        ## Default 2 vCPU (valid for memory + storage < 8 GB or 8192 MB)
+        cpu: int = _validate_parameter(None, 2, 1, 8, "CPU", "vCPU")
+
+        deploy_remote_framework(project_dir, timeout_s, memory_mb, ephemeral_storage_mb, cpu)
 
 
 @cli.command("list_timers", help="See all available timers.")

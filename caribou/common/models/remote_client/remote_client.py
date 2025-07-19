@@ -267,6 +267,7 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
         zip_contents: bytes,
         tmpdirname: str,
         env_vars: dict,
+        cpu: int | None = None,
     ) -> None:
         raise NotImplementedError()
 

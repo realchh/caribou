@@ -981,6 +981,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         zip_contents: bytes,
         tmpdirname: str,
         env_vars: dict,
+        cpu: int | None = None,
     ) -> None:
         # Step 1: Unzip the ZIP file
         zip_path = os.path.join(tmpdirname, "code.zip")
