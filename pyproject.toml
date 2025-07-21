@@ -59,13 +59,14 @@ opentelemetry-exporter-gcp-logging = "^1.9.0a0"
 google-cloud-resource-manager = "^1.14.2"
 functions-framework = "^3.8.3"
 types-protobuf = "^6.30.2.20250516"
+pytest-asyncio = "^1.1.0"
 
 [tool.poetry.extras]
 # This can be used for a more fine-grained dependency management in the future
 
 [tool.poetry.group.dev.dependencies]
 autopep8 = "^2.0.4"
-pytest = "^7.4.4"
+pytest = "^8.2.4"
 coverage = "^7.4.1"
 mypy = "^1.8.0"
 types-pyyaml = "^6.0.12.12"
