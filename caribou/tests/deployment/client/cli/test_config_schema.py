@@ -22,7 +22,7 @@ class TestConfigSchema(unittest.TestCase):
         current_dir = Path(__file__).parent.parent.parent.parent.parent
         config_file = os.path.join(
             current_dir,
-            "deployment/client/cli/template/.caribou/config.yml",
+            "deployment/client/cli/aws_template/.caribou/config.yml",
         )
 
         with open(config_file, "r") as f:

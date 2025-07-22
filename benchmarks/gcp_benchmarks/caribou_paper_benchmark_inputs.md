@@ -12,13 +12,13 @@ Small Input (69KB) source link: <https://www.ncbi.nlm.nih.gov/nuccore/AE001578.1
 Large Input (1.1MB) (almost exact) source link: <https://www.ncbi.nlm.nih.gov/nuccore/AE017199.1>
 
 Use the `Send to` option, select `Complete Record`, and choose `File` to download the data from each of the links above. 
-Then, upload this data into the `genbank` folder of the S3 bucket and follow the instructions in the benchmark's individual `readme.md` file.
+Then, upload this data into the `genbank` folder of the Google Cloud Storage (GCS) bucket and follow the instructions in the benchmark's individual `readme.md` file.
 
 Note: For the large input, we could not locate the exact version of the nucleotide, as we used a slightly older variation that is no longer publicly available (or we cannot otherwise locate it).
 
 Additional params: None
 
-## RAG Data Ingestion (Paper benchmark)
+## RAG Data Ingestion (Paper benchmark) (broken for now because it needs a bedrock call)
 Associated google cloud storage bucket name: `caribou-document-embedding-benchmark`
 
 Similar input data: Most PDF documents are acceptable inputs.
@@ -27,7 +27,7 @@ Small Input (33 pages) source link: <https://www.uscis.gov/sites/default/files/d
 
 Large Input (115 pages) source link: <https://laws-lois.justice.gc.ca/pdf/const_trd.pdf>
 
-Place the respective PDF file in the `input` folder of the S3 bucket.
+Place the respective PDF file in the `input` folder of the GCS bucket.
 
 Note: This benchmark requires many other dependencies to run correctly. Please follow all instructions in the benchmark's individual `readme.md` file.
 
@@ -42,7 +42,7 @@ Large Input (2.4MB) source link: <https://imgur.com/a/DmiKtIg>
 
 Small Input (222KB): This is a downsized version of the large input, resized to 1210 x 908 pixels and approximately 1/10th of the original file size.
 
-Place the respective image file in the `input` folder of the S3 bucket.
+Place the respective image file in the `input` folder of the GCS bucket.
 
 Note: Image processing is a very transmission-heavy application, which is unsuitable for geospatial migration at the current time. 
 As a result, most image files will produce similar results to those presented in Fig. 7 of the Caribou paper.
@@ -58,7 +58,7 @@ Small Input (12 KB, 239 words, 1,301 characters): Use review(s) from the `yelp_a
 
 Large Input (1 KB, 2,119 words, 11,769 characters): Use review(s) from the `yelp_academic_dataset_review.json` dataset with similar word or character counts.
 
-Place the respective text input file in the `input` folder of the S3 bucket.
+Place the respective text input file in the `input` folder of the GCS bucket.
 
 Additional Params: None
 
@@ -71,9 +71,9 @@ Small Input (206KB): Use the `INO Parking evening` video from <https://www.ino.c
 
 Large Input (2.4MB): Use the `INO Group fight` video from <https://www.ino.ca/en/technologies/video-analytics-dataset/videos/>. Download the RGB version of the video and convert it to mp4.
 
-Place the respective video input file in the `input` folder of the S3 bucket.
+Place the respective video input file in the `input` folder of the GCS bucket.
 
-Note: This benchmark also requires the `imagenet_labels.txt` file from <https://github.com/vhive-serverless/vSwarm/blob/main/benchmarks/video-analytics/object_recognition/imagenet_labels.txt> which must be present in the S3 bucket.
+Note: This benchmark also requires the `imagenet_labels.txt` file from <https://github.com/vhive-serverless/vSwarm/blob/main/benchmarks/video-analytics/object_recognition/imagenet_labels.txt> which must be present in the GCS bucket.
 
 Additional note: Please read and follow the terms of the LICENSE in each of the video files.
 

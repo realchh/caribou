@@ -55,6 +55,10 @@ def create_bucket(s3, bucket_name):
 
 def main():
     dynamodb = boto3.client("dynamodb", region_name=constants.GLOBAL_SYSTEM_REGION)
+
+    # Disabled as part of issue #293
+    # s3 = boto3.client("s3", region_name=constants.GLOBAL_SYSTEM_REGION)
+
     # Get all attributes of the constants module
     for attr in dir(constants):
         if attr.endswith("_TABLE"):
@@ -77,6 +81,16 @@ def main():
 
             if created_table:
                 logger.info("Created table: %s", table_name)
+
+        # Disabled as part of issue #293
+        # # If the attribute name ends with '_BUCKET', create an S3 bucket
+        # elif attr.endswith("_BUCKET"):
+        #     # Allow for the bucket name to be overridden by an environment variable
+        #     bucket_name = os.environ.get(f"CARIBOU_OVERRIDE_{attr}", getattr(constants, attr))
+        #     print("bucket_name", bucket_name)
+        #     print(f"attr: {attr}")
+        #     logger.info("Creating bucket: %s", bucket_name)
+        #     create_bucket(s3, bucket_name)
 
 
 if __name__ == "__main__":

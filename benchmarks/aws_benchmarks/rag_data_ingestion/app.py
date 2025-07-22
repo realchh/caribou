@@ -40,8 +40,8 @@ dynamodb_region_name = s3_bucket_region_name
 
 # Change the following RDS and Postgres details to match your setup
 bedrock_runtime_region_name = desired_region
-postgresql_secret_name ="rds!db-4620de75-cc2a-45bc-810a-4d77c3ae6f67" # Replace with your secret name (If set postgresql to be managed by AWS Secrets Manager)
-postgresql_host = "database-1.cktyau4k8m2n.us-east-1.rds.amazonaws.com" # Replace with your RDS endpoint
+postgresql_secret_name ="full_aws_secret_name_for_postgress" # Replace with your secret name (If set postgresql to be managed by AWS Secrets Manager)
+postgresql_host = "some_db.somecharacters.us-east-1.rds.amazonaws.com" # Replace with your RDS endpoint
 postgresql_dbname = "postgres" # Replace with your RDS database name
 postgresql_port = "5432" # Replace with your RDS port
 

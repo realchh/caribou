@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -6,6 +7,7 @@ import tempfile
 import time
 import zipfile
 from datetime import UTC, datetime, timedelta
+from time import sleep
 from typing import Any, Optional
 
 import google.auth
@@ -568,6 +570,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 repository_id=repository_name,
                 repository=repository,
             )
+            sleep(5)
 
         return full_repo
 
@@ -865,7 +868,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
         client = self._pubsub_publisher_client
-        response = client.publish(topic=identifier, data=compress_json_str(message))
+        # compressed json (also change caribou/deployment/client/caribou_workflow.py:1270 to toggle compression)
+        # response = client.publish(topic=identifier, data=compress_json_str(message))
+        response = client.publish(topic=identifier, data=message.encode("utf-8"))
         # for some reason it needs this line so the message gets sent to pub/sub
         print(response.result())
 

@@ -31,9 +31,9 @@ def get_input(event: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError("No message provided")
     output_folder_name = event.get("output_folder_name", message.split(".")[0])
-    t2s_service: str = event.get("t2s_service", "polly")
-    if t2s_service.lower() not in ["polly", "gtts"]:
-        raise ValueError(f"Invalid T2S service, Valid t2s_service are: ['polly', 'gTTS'] (Any case)")
+    t2s_service: str = event.get("t2s_service", "gtts")
+    if t2s_service.lower() not in ["gtts"]:
+        raise ValueError(f"Invalid T2S service, Valid t2s_service are: ['gTTS'] (Any case)")
 
     print(f"input file: {message}, Desired output folder name: {output_folder_name}, T2S service: {t2s_service}")
     input_file = f"input/{message}"
@@ -106,56 +106,13 @@ def text_2_speech(event: dict[str, Any]) -> dict[str, Any]:
         with open(local_name, "r") as f:
             message = f.read()
 
-        # Convert text to speech (Either using Polly or gTTS)
-        # if t2s_service.lower() == "polly":
-        #     polly = boto3.client("polly", region_name=polly_region_name)
-        #     # Check if the message is too long for Polly
-        #     # If it is, split it into smaller chunks, else
-        #     # we directly convert it to speech (< 1500 characters)
-        #     if len(message) > 1500:
-        #         print("Splitting the message into smaller chunks, current length:", len(message))
-        #         chunks = split_text(message)
-        #         print("Number of chunks:", len(chunks))
-        #         audio_files = []
-        #
-        #         for i, chunk in enumerate(chunks):
-        #             response = polly.synthesize_speech(
-        #                 Text=chunk,
-        #                 OutputFormat="mp3",
-        #                 VoiceId="Joanna"
-        #             )
-        #
-        #             chunk_file_name = f"chunk_{i}.mp3"
-        #             chunk_local_name = os.path.join(tmp_dir, chunk_file_name)
-        #             with open(chunk_local_name, "wb") as f:
-        #                 f.write(response['AudioStream'].read())
-        #             audio_files.append(chunk_local_name)
-        #
-        #         # Concatenate audio files
-        #         combined = AudioSegment.empty()
-        #         for file in audio_files:
-        #             segment = AudioSegment.from_mp3(file)
-        #             combined += segment
-        #
-        #         # Get the audio stream from the combined audio
-        #         mp3_fp = BytesIO()
-        #         combined.export(mp3_fp, format="mp3")
-        #         result = mp3_fp.getvalue()
-        #     else:
-        #         response = polly.synthesize_speech(
-        #             Text=message,
-        #             OutputFormat="mp3",
-        #             VoiceId="Amy",  # You can choose a different voice if you prefer
-        #             Engine="standard"
-        #         )
-        #         result = response['AudioStream'].read()
         if t2s_service.lower() == "gtts":
             tts = gTTS(message, lang="en")
             mp3_fp = BytesIO()
             tts.write_to_fp(mp3_fp)
             result = mp3_fp.getvalue()
         else:
-            raise ValueError(f"Invalid T2S service, Valid t2s_service are: ['polly', 'gTTS'] (Any case)")
+            raise ValueError(f"Invalid T2S service, Valid t2s_service are: ['gTTS'] (Any case)")
 
         file_name = "raw_text_2_speech.mp3"
         local_name = os.path.join(tmp_dir, file_name)

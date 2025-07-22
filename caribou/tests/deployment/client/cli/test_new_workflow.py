@@ -18,7 +18,7 @@ class TestCreateNewWorkflowDirectory(unittest.TestCase):
         workflow_name = "test_workflow"
         create_new_workflow_directory(workflow_name)
         mock_exists.assert_called_once_with("/current/directory/test_workflow")
-        mock_copytree.assert_called_once_with("/path/to/template", "/current/directory/test_workflow")
+        mock_copytree.assert_called_once_with("/path/to/aws_template", "/current/directory/test_workflow")
         mock_file.assert_any_call("/new/workflow/dir/file1", "r", encoding="utf-8")
         mock_file.assert_any_call("/new/workflow/dir/file1", "w", encoding="utf-8")
         mock_file.assert_any_call("/new/workflow/dir/file2", "r", encoding="utf-8")

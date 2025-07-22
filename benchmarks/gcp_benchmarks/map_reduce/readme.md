@@ -1,10 +1,9 @@
 # Map Reduce Benchmarks
 
-This benchmark requires access to the S3 bucket named `caribou-map-reduce`,
-with the AWS Region set to `us-east-1` (N. Virginia).
+This benchmark requires access to the Google Cloud Storage bucket named `caribou-map-reduce`.
 
-Alternatively, the user may change the S3 bucket name and region in `app.py`,
-by changing the values of `s3_bucket_name` and `s3_bucket_region_name` to the
+Alternatively, the user may change the Google Cloud Storage bucket name in `app.py`,
+by changing the values of `gcp_bucket_name` to the
 desired bucket.
 
 There needs to be a folder in the bucket with the base dir (`subset_256MB` in our example)

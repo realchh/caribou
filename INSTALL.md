@@ -135,16 +135,76 @@ Since the AWS lambda environment restricts us from using Docker, we have to migr
 
 Disclaimer: GCP Support is currently experimental. Use it at your own risk.
 
-To run the framework, you first need to setup a GCP project. 
+To run the framework, you first need to setup a [GCP project](console.cloud.google.com).
 
-## Required GCP APIs
+Then, install the [gcloud CLI](https://cloud.google.com/sdk/docs/install#linux) using these commands:
+- Download the linux archive files:
+```
+curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+```
+- Extract the contents of the file:
+```
+tar -xf google-cloud-cli-linux-x86_64.tar.gz
+```
+- Run the gcloud CLI installation script:
+```
+./google-cloud-sdk/install.sh
+```
+- Initialize the gcloud CLI:
+```
+gcloud init
+```
 
-- Cloud Run
-- Firestore
-- Cloud Storage
-- Cloud Scheduler
-- Artifact Registry
-- 
+## GCP APIs that needs to be enabled for the service
+
+- [Cloud Run](https://console.developers.google.com/apis/api/run.googleapis.com/)
+- [Firestore](https://console.developers.google.com/apis/api/firestore.googleapis.com/)
+- [IAM](https://console.developers.google.com/apis/api/iam.googleapis.com/)
+- [Cloud Resource Manager](https://console.developers.google.com/apis/api/cloudresourcemanager.googleapis.com/)
+- [Cloud Scheduler](https://console.developers.google.com/apis/api/cloudscheduler.googleapis.com/)
+- [Cloud Billing](https://console.developers.google.com/apis/api/cloudbilling.googleapis.com/)
+- [Cloud Monitoring](https://console.developers.google.com/apis/api/monitoring.googleapis.com/)
+- [Cloud Logging](https://console.developers.google.com/apis/api/logging.googleapis.com/)
+
+If gcloud CLI has been properly installed, you can run this command to enable all of the required APIs
+```
+gcloud services enable \
+  run.googleapis.com \
+  firestore.googleapis.com \
+  iam.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  cloudscheduler.googleapis.com \
+  cloudbilling.googleapis.com \
+  monitoring.googleapis.com \
+  logging.googleapis.com
+```
+
+## Default key-value store database
+For GCP, we are using firestore to store our key-value pairs. Please create a default firestore database.
+
+- Go to [firestore page](https://console.cloud.google.com/firestore/databases) in the Google Cloud Console.
+- Click on "CREATE A FIRESTORE DATABASE".
+- Select Native Mode.
+- Use the default database id "(default)". Using this id allows you to take advantage of firestore's [free quota](https://firebase.google.com/docs/firestore/quotas#free-quota).
+- Choose your default system region (e.g., us-east1) to be the database region.
+- Click on "CREATE DATABASE". Your firestore database will then be successfully created. This may take a while.
+
+## Gcloud authentication for the framework
+`gcloud init` only sets up the authentication for the command line. For the python scripts and framework, you need to
+use a different method to log in and generate a credential file required to run our framework.
+```
+gcloud auth application-default login
+```
+After running this command, a link to log in to your account will appear. Inside your web browser, log in to your desired
+account and copy the generated key to the space provided in the gcloud CLI.
+
+## Configuring Caribou to use GCP
+Set the environment variable `CARIBOU_DEFAULT_PROVIDER` to GCP.
+```
+export CARIBOU_DEFAULT_PROVIDER=gcp
+```
+
+There is no need to run `caribou setup_tables`. Firestore automatically generates the table when a value is provided to the table.
 
 ## Other dependencies
 

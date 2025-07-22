@@ -1,9 +1,15 @@
 import os
 import shutil
 
+from caribou.common.provider import Provider
+
 
 def create_new_workflow_directory(workflow_name: str) -> None:
-    template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "template")
+    provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+    if provider == Provider.GCP.value:
+        template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "gcp_template")
+    else:
+        template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "aws_template")
 
     template_kwargs = {
         "workflow_name": workflow_name,

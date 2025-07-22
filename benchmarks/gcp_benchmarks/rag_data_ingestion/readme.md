@@ -1,9 +1,9 @@
-# RAG Data Ingestion Benchmark
+# RAG Data Ingestion Benchmark (Broken)
 
 This benchmark is the `Data Ingestion` part of the bigger document chat application 
 benchmark: [https://github.com/UBC-CIC/document-chat](https://github.com/UBC-CIC/document-chat) (the original repository's license file is included in this directory)
 
-This benchmark requires access to the S3 bucket named `caribou-document-embedding-benchmark`,
+This benchmark requires access to the Google Cloud Storage bucket named `caribou-document-embedding-benchmark`,
 a valid `PostgreSQL` database with its credential saved to `AWS Secret Manager`, two dynamoDB 
 tables by the name of `caribou-document-embedding-benchmark-document` (Partition key: `userid` (String),
 Sort key: `documentid` (String)) and `caribou-document-embedding-benchmark-memory` 
@@ -14,7 +14,7 @@ Alternatively, the user should set the aforementioned databases and dependencies
 
 You can also enable/disable image extraction from images by changing the EXTRACT_IMAGES macro.
 
-There needs to be a file in the S3 bucket, for example, `example.pdf`, in a folder called `input`,
+There needs to be a file in the Google Cloud Storage bucket, for example, `example.pdf`, in a folder called `input`,
 or any valid PDF file.
 
 This benchmark allows for usage of custom AWS Bedrock Embedding, which

@@ -2,11 +2,10 @@
 
 Original source: https://github.com/ddps-lab/serverless-faas-workbench (the original repository's license file is included in this directory).
 
-This benchmark requires access to the S3 bucket named `caribou-image-processing-benchmark`,
-with the AWS Region set to `us-east-1` (N. Virginia).
+This benchmark requires access to the Google Cloud Storage bucket named `caribou-image-processing-benchmark`.
 
-Alternatively, the user may change the S3 bucket name and region in `app.py`,
-by changing the values of `s3_bucket_name` and `s3_bucket_region_name` to the
+Alternatively, the user may change the Google Cloud Storage bucket name and region in `app.py`,
+by changing the values of `gcp_bucket_name` to the
 desired bucket.
 
 There needs to be an image file in the bucket, for example `image_name.jpg`, in a folder

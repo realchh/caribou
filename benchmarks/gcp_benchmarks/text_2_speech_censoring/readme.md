@@ -3,7 +3,7 @@
 Original source: [https://github.com/SimonEismann/FunctionsAndWorkflows](https://github.com/SimonEismann/FunctionsAndWorkflows) (the original repository's license file is included in this directory)
 
 This benchmark requires access to the Google Cloud Storage bucket named `caribou-text-2-speech-censoring`.
-Alternatively, the user may change the Google Cloud Storage bucket name and region in `app.py`, by changing the values of `gcp_bucket_name` to the desired bucket.
+Alternatively, the user may change the Google Cloud Storage bucket name in `app.py`, by changing the values of `gcp_bucket_name` to the desired bucket.
 
 There needs to be an text file in the bucket, for example `text_file.txt`, in a folder called `input`.
 
