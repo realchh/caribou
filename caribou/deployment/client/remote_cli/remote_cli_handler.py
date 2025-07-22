@@ -2,6 +2,7 @@ import logging
 import os
 from typing import Any, Optional
 
+import flask
 
 from caribou.data_collector.components.carbon.carbon_collector import CarbonCollector
 from caribou.data_collector.components.performance.performance_collector import PerformanceCollector
@@ -14,7 +15,6 @@ from caribou.monitors.deployment_manager import DeploymentManager
 from caribou.monitors.deployment_migrator import DeploymentMigrator
 from caribou.syncers.log_syncer import LogSyncer
 
-import flask
 if "K_SERVICE" in os.environ:
     # We are in GCP, so we need to set up the gcp logging client.
     import google.cloud.logging
@@ -27,19 +27,23 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # Set the logging level
 
 
-def caribou_cli(event: dict[str, Any] | flask.Request, context: dict[str, Any] | None = None) -> dict[str, Any]:  # pylint: disable=unused-argument
-
-    if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
+def caribou_cli(
+    event: dict[str, Any] | flask.Request, context: dict[str, Any] | None = None  # pylint: disable=unused-argument
+) -> dict[str, Any]:
+    if "K_SERVICE" in os.environ:
+        # We are on GCP. The 'request' is a Flask request object.
+        try:
+            if isinstance(event, flask.Request):
+                event_payload = event.get_json()
+            else:
+                raise AttributeError
+        except AttributeError:
+            # Handles cases where the request might not be what's expected
+            return {"status": 400, "message": "Invalid GCP request format"}
+    else:
         # We are on AWS Lambda. The 'request' is the 'event' dict.
         # The actual payload is usually a JSON string in the 'body'.
         event_payload = event
-    else:
-        # We are on GCP. The 'request' is a Flask request object.
-        try:
-            event_payload = event.get_json()
-        except AttributeError:
-             # Handles cases where the request might not be what's expected
-            return {"status": 400, "message": "Invalid GCP request format"}
 
     return cli_logic(event_payload)
 
