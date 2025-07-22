@@ -216,7 +216,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                     revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
                 )
                 if cpu_total_time:
-                    self._insights_logs[request_id]["cpu_total_time"] = cpu_total_time * 1000  # to ms
+                    self._insights_logs[request_id]["cpu_total_time"] = cpu_total_time
 
                 # Fetch Memory Utilization
                 memory_utilization = remote_client.query_metric(
@@ -284,7 +284,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         if provider == Provider.GCP.value:
             log_dict = json.loads(log_entry)
             log_name = log_dict.get("logName", None)
-            if "run.googleapis.com%2Frequests" in log_name:
+            if log_name and "run.googleapis.com%2Frequests" in log_name:
                 trace = log_dict.get("trace", None)
 
                 if trace is None:
@@ -876,7 +876,6 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         execution_data.cpu_model = cpu_model
 
         # Add the CPU model to unique models
-        print(">>> CPU model:", cpu_model)
         workflow_run_sample.cpu_models.add(cpu_model)
 
     def _extract_download_data_from_sync_table(

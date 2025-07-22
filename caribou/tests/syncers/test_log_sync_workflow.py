@@ -1,7 +1,10 @@
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, call, patch, MagicMock
 from datetime import datetime, timedelta
 import json
+
+from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClient
+from caribou.common.provider import Provider
 from caribou.syncers.log_sync_workflow import LogSyncWorkflow
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.syncers.components.workflow_run_sample import WorkflowRunSample
@@ -1025,6 +1028,110 @@ class TestLogSyncWorkflow(unittest.TestCase):
 
         # Should return JSON string
         self.assertIsInstance(result, str)
+
+    # --- Tests for GCP-Specific Logic ---
+
+    @patch.object(LogSyncWorkflow, "_process_log_entry")
+    @patch.object(LogSyncWorkflow, "_setup_gcp_insights")
+    @patch.object(LogSyncWorkflow, "_get_remote_client")
+    def test_process_logs_for_gcp_provider(self, mock_get_remote_client, mock_setup_gcp, mock_process_log):
+        """Tests that the GCP code path is correctly followed."""
+        mock_gcp_client = MagicMock(spec=GCPRemoteClient)
+        mock_get_remote_client.return_value = mock_gcp_client
+
+        # GCP logs are returned as a list of JSON strings by the client
+        mock_gcp_logs_as_strings = [
+            json.dumps({"jsonPayload": {"severity": "CARIBOU"}, "logName": "..."}),
+            json.dumps({"logName": "run.googleapis.com%2Frequests"}),
+        ]
+        mock_gcp_client.get_logs_between.return_value = mock_gcp_logs_as_strings
+
+        provider_region = {"provider": Provider.GCP.value, "region": "us-central1"}
+
+        self.log_sync_workflow._process_logs_for_instance_for_one_region(
+            "test-instance", provider_region, datetime.now(), datetime.now()
+        )
+
+        mock_setup_gcp.assert_called_once()
+        # The test checks that the loop for processing entries is called correctly.
+        self.assertEqual(mock_process_log.call_count, 2)
+
+    def test_setup_gcp_insights(self):
+        """Tests the parsing of GCP request logs and metric querying."""
+        # Arrange
+        mock_remote_client = MagicMock(spec=GCPRemoteClient)
+
+        # A sample structured log from GCP Cloud Run
+        gcp_request_log = json.dumps(
+            {
+                "logName": "projects/p/logs/run.googleapis.com%2Frequests",
+                "trace": "projects/p/traces/request-123",
+                "timestamp": "2025-07-20T12:00:05Z",
+                "httpRequest": {"latency": "0.5s", "requestSize": "100", "responseSize": "200", "status": 200},
+                "resource": {"labels": {"revision_name": "my-service-rev1", "instance_id": "instance-abc"}},
+            }
+        )
+
+        # Mock the metric query to return sample values
+        mock_remote_client.query_metric.side_effect = [1.5, 0.5, 512 * 1024 * 1024]  # 512MB in bytes
+
+        # Act
+        self.log_sync_workflow._setup_gcp_insights([gcp_request_log], mock_remote_client)
+
+        # Assert
+        self.assertIn("request-123", self.log_sync_workflow._insights_logs)
+        insights = self.log_sync_workflow._insights_logs["request-123"]
+        print(insights)
+        self.assertEqual(insights["duration"], 0.5)
+        self.assertEqual(insights["rx_bytes"], 100.0)
+        self.assertEqual(insights["tx_bytes"], 200.0)
+        self.assertEqual(insights["total_network"], 300.0)
+        self.assertEqual(insights["cpu_total_time"], 1.5)
+        self.assertEqual(insights["memory_utilization"], 50.0)
+
+        # Verify query_metric was called correctly
+        self.assertEqual(mock_remote_client.query_metric.call_count, 3)
+
+    def test_process_log_entry_for_gcp(self):
+        """Tests parsing a structured GCP log for CARIBOU data."""
+        time_to = datetime.now(GLOBAL_TIME_ZONE)
+        provider_region = {"provider": Provider.GCP.value, "region": "us-central1"}
+
+        # A sample structured CARIBOU log from GCP
+        log_dict = {
+            "jsonPayload": {
+                "severity": "CARIBOU",
+                "message": f"TIME (2025-07-20 12:00:00,000000+0000) RUN_ID (gcp-run-1) MESSAGE (EXECUTED: INSTANCE (test-instance) with USER_EXECUTION_TIME (1.5) s and TOTAL_EXECUTION_TIME (2.0) s) LOG_VERSION ({LOG_VERSION})",
+            },
+            "trace": "projects/p/traces/gcp-request-1",
+        }
+
+        # The log syncer expects a list of JSON strings
+        log_entry_str = json.dumps(log_dict)
+
+        # Mock the message handler to isolate the test
+        self.log_sync_workflow._handle_system_log_messages = MagicMock()
+
+        self.log_sync_workflow._process_log_entry(log_entry_str, provider_region, time_to)
+
+        # Assert that a workflow sample was created
+        self.assertIn("gcp-run-1", self.log_sync_workflow._collected_logs)
+
+        # Assert that the message handler was called with the correct, extracted data
+        self.log_sync_workflow._handle_system_log_messages.assert_called_once()
+        call_args = self.log_sync_workflow._handle_system_log_messages.call_args[0]
+        self.assertIn("EXECUTED: INSTANCE (test-instance)", call_args[0])  # message_to_parse
+        self.assertEqual(call_args[1], "gcp-run-1")  # run_id
+        self.assertEqual(call_args[5], "gcp-request-1")  # request_id
+
+    # --- Tests for Edge Cases and Helpers ---
+
+    def test_extract_float_from_log_entry_failure(self):
+        """Tests that the float extractor raises a ValueError for non-float values."""
+        log_entry = "SOME_VALUE (not-a-float)"
+        regex = r"SOME_VALUE \((.*?)\)"
+        with self.assertRaises(ValueError):
+            self.log_sync_workflow._extract_float_from_log_entry(log_entry, regex, "some_value")
 
 
 if __name__ == "__main__":

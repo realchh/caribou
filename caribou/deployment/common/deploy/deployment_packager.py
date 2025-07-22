@@ -13,7 +13,6 @@ from collections import defaultdict
 from typing import Optional
 
 import boto3
-import google.cloud.storage
 import pip
 import yaml
 import zstandard
@@ -83,61 +82,67 @@ class DeploymentPackager:
 
         provider = self._determine_home_provider()
 
-        with open(requirements_filename, "a", encoding="utf-8") as file:
-            if provider == "aws":
-                if "boto3" not in requirements:
-                    file.write(f"\nboto3=={boto3.__version__}\n")
-            if provider == "gcp":
-                if "google-cloud" not in requirements:
-                    file.write("\ngoogle-cloud==0.34.0\n")
-                if "google-cloud-storage" not in requirements:
-                    file.write(f"\ngoogle-cloud-storage=={google.cloud.storage.__version__}\n")
-                if "google-cloud-firestore" not in requirements:
-                    file.write("\ngoogle-cloud-firestore\n")
-                if "google-cloud-pubsub" not in requirements:
-                    file.write("\ngoogle-cloud-pubsub\n")
-                if "google-cloud-logging" not in requirements:
-                    file.write("\ngoogle-cloud-logging\n")
-                if "google-cloud-trace" not in requirements:
-                    file.write("\ngoogle-cloud-trace\n")
-                if "google-cloud-artifact-registry" not in requirements:
-                    file.write("\ngoogle-cloud-artifact-registry\n")
-                if "google-cloud-eventarc" not in requirements:
-                    file.write("\ngoogle-cloud-eventarc\n")
-                if "google-cloud-iam" not in requirements:
-                    file.write("\ngoogle-cloud-iam\n")
-                if "google-cloud-resource-manager" not in requirements:
-                    file.write("\ngoogle-cloud-resource-manager\n")
-                if "google-cloud-run" not in requirements:
-                    file.write("\ngoogle-cloud-run\n")
-                if "google-cloud-monitoring" not in requirements:
-                    file.write("\ngoogle-cloud-monitoring\n")
-                if "google-cloud-scheduler" not in requirements:
-                    file.write("\ngoogle-cloud-scheduler\n")
-                if "types-protobuf" not in requirements:
-                    file.write("\ntypes-protobuf\n")
-                if "functions-framework" not in requirements:
-                    file.write("\nfunctions-framework==3.*\n")
-                if "opentelemetry-api" not in requirements:
-                    opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
-                    file.write(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
-                if "opentelemetry-sdk" not in requirements:
-                    opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
-                    file.write(f"\nopentelemetry-sdk=={opentelemetry_sdk_version}\n")
-                if "opentelemetry-exporter-gcp_trace" not in requirements:
-                    opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
-                    file.write(f"\nopentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}\n")
-                if "opentelemetry-exporter-gcp_logging" not in requirements:
-                    opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
-                    file.write(f"\nopentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}\n")
-            if "pyyaml" not in requirements:
-                file.write(f"\npyyaml=={yaml.__version__}\n")
-            if "pytz" not in requirements:
-                file.write(f"\npytz=={self._pytz_version}\n")
-            if "zstandard" not in requirements:
-                file.write(f"\nzstandard=={zstandard.__version__}\n")
-            if "numpy" not in requirements:
-                file.write("\nnumpy==2.2.1\n")
+        lines_to_add = []
+
+        if provider == "aws":
+            if "boto3" not in requirements:
+                lines_to_add.append(f"\nboto3=={boto3.__version__}\n")
+        if provider == "gcp":
+            if "google-cloud" not in requirements:
+                lines_to_add.append("\ngoogle-cloud==0.34.0\n")
+            if "google-cloud-storage" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-storage\n")
+            if "google-cloud-firestore" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-firestore\n")
+            if "google-cloud-pubsub" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-pubsub\n")
+            if "google-cloud-logging" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-logging\n")
+            if "google-cloud-trace" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-trace\n")
+            if "google-cloud-artifact-registry" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-artifact-registry\n")
+            if "google-cloud-eventarc" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-eventarc\n")
+            if "google-cloud-iam" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-iam\n")
+            if "google-cloud-resource-manager" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-resource-manager\n")
+            if "google-cloud-run" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-run\n")
+            if "google-cloud-monitoring" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-monitoring\n")
+            if "google-cloud-scheduler" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-scheduler\n")
+            if "types-protobuf" not in requirements:
+                lines_to_add.append("\ntypes-protobuf\n")
+            if "functions-framework" not in requirements:
+                lines_to_add.append("\nfunctions-framework==3.*\n")
+            if "opentelemetry-api" not in requirements:
+                opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
+                lines_to_add.append(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
+            if "opentelemetry-sdk" not in requirements:
+                opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
+                lines_to_add.append(f"\nopentelemetry-sdk=={opentelemetry_sdk_version}\n")
+            if "opentelemetry-exporter-gcp_trace" not in requirements:
+                opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
+                lines_to_add.append(f"\nopentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}\n")
+            if "opentelemetry-exporter-gcp_logging" not in requirements:
+                opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
+                lines_to_add.append(f"\nopentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}\n")
+        if "pyyaml" not in requirements:
+            lines_to_add.append(f"\npyyaml=={yaml.__version__}\n")
+        if "pytz" not in requirements:
+            lines_to_add.append(f"\npytz=={self._pytz_version}\n")
+        if "zstandard" not in requirements:
+            lines_to_add.append(f"\nzstandard=={zstandard.__version__}\n")
+        if "numpy" not in requirements:
+            lines_to_add.append("\nnumpy==2.2.1\n")
+
+        if lines_to_add:
+            append_content = "\n" + "\n".join(lines_to_add) + "\n"
+            with open(requirements_filename, "a", encoding="utf-8") as file:
+                file.write(append_content)
 
     @property
     def _pytz_version(self) -> str:
@@ -325,7 +330,7 @@ class DeploymentPackager:
             if "google-cloud" not in requirements:
                 requirements.append("google-cloud==0.34.0")
             if "google-cloud-storage" not in requirements:
-                requirements.append(f"google-cloud-storage=={google.cloud.storage.__version__}")
+                requirements.append("google-cloud-storage")
             if "google-cloud-firestore" not in requirements:
                 requirements.append("google-cloud-firestore")
             if "google-cloud-pubsub" not in requirements:

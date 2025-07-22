@@ -1428,7 +1428,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         headers = {"Authorization": f"Bearer {identity_token}", "Content-Type": "application/json"}
 
         try:
-            response = requests.post(target_url, headers=headers, json=payload, timeout=30)
+            response = requests.post(target_url, headers=headers, json=payload, timeout=300)
             response.raise_for_status()
             logger.info("Successfully invoked remote CLI. Status: %d", response.status_code)
         except requests.exceptions.RequestException as e:

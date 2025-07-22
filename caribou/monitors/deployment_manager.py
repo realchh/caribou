@@ -171,7 +171,6 @@ class DeploymentManager(Monitor):
             self.remote_run_deployment_algorithm(workflow_id, solve_hours, leftover_tokens)
         else:
             # Invoke / run the deployment manager solve locally
-            print(f"running deployment algorithm locally with solve hours: {solve_hours} and leftover tokens: {leftover_tokens}")
             self.run_deployment_algorithm(workflow_id, solve_hours, leftover_tokens)
 
     def run_deployment_algorithm(self, workflow_id: str, solve_hours: list[str], leftover_tokens: int) -> None:

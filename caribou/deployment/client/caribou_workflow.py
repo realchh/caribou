@@ -447,8 +447,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             successor_workflow_placement_decision = self.get_successor_workflow_placement_decision_dictionary(
                 workflow_placement_decision, successor_instance_name
             )
-            print(f"workflow placement decision: {workflow_placement_decision}")
-            print(f"successor workflow placement decision: {successor_workflow_placement_decision}")
             transmission_taint = uuid.uuid4().hex
             payload_wrapper: dict[str, Any] = {
                 "workflow_placement_decision": successor_workflow_placement_decision,
