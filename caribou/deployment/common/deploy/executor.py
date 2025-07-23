@@ -26,7 +26,6 @@ class Executor:
                 )
 
     def _do_apicall(self, instruction: APICall, client: RemoteClient) -> None:
-        print(f"Executing {instruction.name} on {client.__class__.__name__}")
         final_kwargs = self.__resolve_variables(instruction)
         try:
             method = getattr(client, instruction.name)
@@ -39,7 +38,6 @@ class Executor:
         except Exception as e:
             raise RuntimeError(f"Error while executing {instruction.name} on {client.__class__.__name__}") from e
         if instruction.output_var is not None:
-            print(f"Recorded variable {instruction.output_var} to {response}")
             self.variables[instruction.output_var] = response
 
     def _do_recordresourcevariable(self, instruction: RecordResourceVariable, _: RemoteClient) -> None:

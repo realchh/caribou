@@ -1,18 +1,19 @@
+import logging
 import os
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-from google.cloud import firestore
 from google.api_core import exceptions as google_api_exceptions
+from google.cloud import firestore
 
 from caribou.common import constants
 from caribou.common.models.endpoints import Endpoints
 from caribou.common.provider import Provider
-import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def remove_aws_table(dynamodb: Any, table_name: str, verbose: bool = True) -> None:
     # Check if the table already exists (If not skip deletion)
@@ -49,11 +50,13 @@ def remove_bucket(s3: Any, s3_resource: Any, bucket_name: str) -> None:
             # raise the exception and notify the user
             raise
 
+
 def teardown_framework_tables(provider: str) -> None:
     if provider == Provider.GCP.value:
         teardown_gcp_framework_tables()
     else:
         teardown_aws_framework_tables()
+
 
 def teardown_aws_framework_tables() -> None:
     dynamodb = boto3.client("dynamodb", region_name=constants.GLOBAL_SYSTEM_REGION)
@@ -74,11 +77,12 @@ def teardown_aws_framework_tables() -> None:
             except Exception as e:  # pylint: disable=broad-except
                 logger.error("Error remove table %s: %s", table_name, e)
 
+
 def teardown_gcp_framework_tables() -> None:
     """Handles deletion of all Firestore collections."""
     try:
         firestore_db = firestore.Client()
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("Failed to create Firestore client. Ensure GCP authentication is configured. Error: %s", e)
         return
 
@@ -96,10 +100,12 @@ def teardown_gcp_framework_tables() -> None:
             except Exception as e:  # pylint: disable=broad-except
                 logger.error("Error removing collection %s: %s", collection_name, e)
 
+
 def teardown_framework_buckets(provider: str) -> None:
     # Only used for legacy buckets
     if provider == Provider.AWS.value:
         teardown_aws_framework_buckets()
+
 
 def teardown_aws_framework_buckets() -> None:
     # Only used for legacy buckets
@@ -118,11 +124,13 @@ def teardown_aws_framework_buckets() -> None:
             except Exception as e:  # pylint: disable=broad-except
                 logger.error("Error remove bucket %s: %s", bucket_name, e)
 
+
 def remove_sync_tables_all_regions(provider: str) -> None:
     if provider == Provider.GCP.value:
         remove_sync_tables_gcp_all_regions()
     else:
         remove_sync_tables_aws_all_regions()
+
 
 def remove_sync_tables_aws_all_regions() -> None:
     # First get all the regions
@@ -164,11 +172,12 @@ def remove_sync_tables_aws_all_regions() -> None:
     if len(error_regions) > 0:
         print(f"Removed from all applicable listed regions except: {error_regions}")
 
+
 def remove_sync_tables_gcp_all_regions() -> None:
     """Remove sync tables from GCP Firestore. Note: Firestore is global within a project."""
     try:
         firestore_client = firestore.Client()
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("Failed to create Firestore client. Error: %s", e)
         return
 
@@ -192,6 +201,7 @@ def remove_sync_tables_gcp_all_regions() -> None:
     else:
         logger.info("Successfully removed all sync tables")
 
+
 def remove_gcp_collection(firestore_client: firestore.Client, collection_name: str, batch_size: int = 200) -> None:
     """
     Deletes all documents in a Firestore collection. This effectively deletes the collection.
@@ -211,25 +221,24 @@ def remove_gcp_collection(firestore_client: firestore.Client, collection_name: s
             batch.commit()
             # Recurse to delete the next batch
             return remove_gcp_collection(firestore_client, collection_name, batch_size)
-        else:
-            logger.info("GCP Collection '%s' is now empty.", collection_name)
-            return None
+
+        logger.info("GCP Collection '%s' is now empty.", collection_name)
+        return None
 
     except google_api_exceptions.NotFound:
         logger.info("GCP Collection '%s' not found or already empty.", collection_name)
         return None
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("Error deleting from collection '%s': %s", collection_name, e)
         raise
+
 
 def main() -> None:
     provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
     # Remove any and all sync tables in all regions
     remove_sync_tables_all_regions(provider)
-
     # Remove the core framework tables
     teardown_framework_tables(provider)
-
     # Remove framework buckets
     ## This is targetting legacy buckets that are not used anymore
     ## Current iteration of the framework does not use any buckets

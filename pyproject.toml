@@ -123,6 +123,7 @@ pretty = true
 exclude = [
     "caribou/tests",
     "caribou/common/setup",
+    "caribou/deployment/client/cli/templates",
     "caribou/common/models/remote_client/mock_remote_client.py",
 ]
 
@@ -148,7 +149,8 @@ exclude = '''
   | buck-out
   | build
   | dist
-  | ./caribou/deployment/client/cli/template/app.py
+  | ./caribou/deployment/client/cli/templates/aws_template/app.py
+  | ./caribou/deployment/client/cli/templates/gcp_template/app.py
 )/
 '''
 
@@ -166,7 +168,11 @@ disable = [
     "R0914", # Too many local variables (too noisy)
     "R0917", # Too many positional arguments (too noisy)
 ]
-ignore = ["tests", "caribou/deployment/client/cli/template"]
+ignore = [
+    "tests",
+    "caribou/deployment/client/cli/templates/aws_template",
+    "caribou/deployment/client/cli/templates/gcp_template"
+]
 
 [tool.pytest.ini_options]
 testpaths = ["caribou/tests"]

@@ -27,7 +27,7 @@ from caribou.common.models.endpoints import Endpoints
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
 from caribou.common.provider import Provider
-from caribou.common.utils import decompress_json_str, get_function_source
+from caribou.common.utils import get_function_source
 from caribou.deployment.client.caribou_function import CaribouFunction
 
 if "K_SERVICE" in os.environ:
@@ -456,7 +456,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             # payload_wrapper["workflow_placement_decision"] = successor_workflow_placement_decision
             # payload_wrapper["transmission_taint"] = transmission_taint
             json_payload = json.dumps(payload_wrapper)
-            print(f"DEBUG: Invoking sync node with payload: {json_payload}")
             _, _, _, _, _ = self._get_remote_client(provider, region).invoke_function(
                 message=json_payload,
                 identifier=identifier,
@@ -566,9 +565,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         instance = workflow_placement_decision["instances"][current_instance_name]
         successor_instances = instance["succeeding_instances"]
         # If there is only one successor instance, return it
-        print(f"DEBUG successor_instances: {successor_instances}")
         if len(successor_instances) == 1:
-            print(f"DEBUG successor_instance looked: {successor_instances[0]}")
             name_prefix = successor_instances[0].split(":", maxsplit=1)[0]
             if name_prefix == successor_function_name or name_prefix.endswith(f"-{successor_function_name}"):
                 return successor_instances[0]
@@ -578,7 +575,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # If there are multiple successor instances, return the first one that matches the successor function
         # name and has the correct index
         for successor_instance in successor_instances:
-            print(f"DEBUG successor_instance looked: {successor_instance}")
             name_prefix = successor_instance.split(":", maxsplit=1)[0]
             if name_prefix == successor_function_name or name_prefix.endswith(f"-{successor_function_name}"):
                 if successor_instance.split(":", maxsplit=2)[1] == "sync":
@@ -1236,7 +1232,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
     ) -> tuple[dict[str, Any], float]:
         # Retrieve the argument and check if it is a dictionary.
         # (Currently only support dictionary arguments)
-        print(f"DEBUG: Received raw event for processing: {args[0]}")
         argument_raw = args[0]
         if not isinstance(argument_raw, dict):
             raise RuntimeError(
@@ -1271,7 +1266,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             # caribou/common/models/remote_client/gcp_remote_client.py:870
             # json_string = decompress_json_str(decoded_data)
             json_string = decoded_data.decode("utf-8")
-            print(f"DEBUG: Decoded JSON string for processing: {json_string}")
             decoded_json = json.loads(json_string)
             if "payload" in decoded_json or "workflow_placement_decision" in decoded_json:
                 caribou_wrapper_argument = decoded_json

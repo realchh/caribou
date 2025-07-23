@@ -116,10 +116,6 @@ class Deployer:
         deployed_regions: dict[str, dict[str, str]],
         specific_staging_area_data: dict[str, Any],
     ) -> dict[str, dict[str, Any]]:
-        print(f"redeploying workflow: {self._config.workflow_name} with version {self._config.workflow_version} \n\n")
-        print(f"workflow function descriptions: {workflow_function_descriptions} \n\n")
-        print(f"deployed regions: {deployed_regions} \n\n")
-        print(f"specific staging area data: {specific_staging_area_data} \n\n")
         function_to_deployment_regions = self._get_function_to_deployment_regions(specific_staging_area_data)
 
         filtered_function_to_deployment_regions = self._filter_function_to_deployment_regions(
@@ -143,7 +139,6 @@ class Deployer:
         return self._get_new_deployment_instances(specific_staging_area_data)
 
     def _get_function_to_deployment_regions(self, staging_area_data: dict) -> dict[str, dict[str, str]]:
-        print(f"getting function to deployment regions: {staging_area_data} \n\n")
         function_to_deployment_regions: dict[str, dict[str, str]] = {}
         for instance_name, placement in staging_area_data.items():
             provider = placement["provider_region"]["provider"]
@@ -168,7 +163,6 @@ class Deployer:
                     "provider": placement["provider_region"]["provider"],
                     "region": placement["provider_region"]["region"],
                 }
-            print(f"function to deployment regions: {function_to_deployment_regions} \n\n")
         return function_to_deployment_regions
 
     def _filter_function_to_deployment_regions(
@@ -178,11 +172,8 @@ class Deployer:
     ) -> dict[str, dict[str, str]]:
         filtered_function_to_deployment_regions: dict[str, dict[str, str]] = {}
         for function_name, deployment_regions in function_to_deployment_regions.items():
-            print(f"function name: {function_name}")
-            print(f"deployment regions: {deployment_regions} \n\n")
             if function_name not in deployed_regions:
                 filtered_function_to_deployment_regions[function_name] = deployment_regions
-        print(f"filtered function to deployment regions: {filtered_function_to_deployment_regions} \n\n")
         return filtered_function_to_deployment_regions
 
     def _set_workflow_id(self) -> None:

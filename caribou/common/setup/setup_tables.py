@@ -61,6 +61,7 @@ def main():
 
     # Get all attributes of the constants module
     for attr in dir(constants):
+        # If the attribute name ends with '_TABLE', create a DynamoDB table
         if attr.endswith("_TABLE"):
             table_name = getattr(constants, attr)
             if table_name in [constants.SYNC_MESSAGES_TABLE, constants.SYNC_PREDECESSOR_COUNTER_TABLE]:

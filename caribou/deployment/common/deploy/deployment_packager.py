@@ -334,11 +334,11 @@ class DeploymentPackager:
             if "google-cloud-firestore" not in requirements:
                 requirements.append("google-cloud-firestore")
             if "google-cloud-pubsub" not in requirements:
-                requirements.append("google-cloud-pubsub==2.29.0")
+                requirements.append("google-cloud-pubsub")
             if "google-cloud-logging" not in requirements:
                 requirements.append("google-cloud-logging")
             if "google-cloud-trace" not in requirements:
-                requirements.append("google-cloud-trace==1.16.1")
+                requirements.append("google-cloud-trace")
             if "google-cloud-artifact-registry" not in requirements:
                 requirements.append("google-cloud-artifact-registry")
             if "google-cloud-eventarc" not in requirements:

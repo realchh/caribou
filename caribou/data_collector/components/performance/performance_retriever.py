@@ -40,7 +40,6 @@ class PerformanceRetriever(DataRetriever):
                 "transmission_latency": transmission_latency_dict,
             }
 
-        print("result: \n", result_dict)
         return result_dict
 
     def _get_latency_distribution(self, region_from: dict[str, Any], region_to: dict[str, Any]) -> list[float]:

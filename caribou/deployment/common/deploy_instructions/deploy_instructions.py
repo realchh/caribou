@@ -25,10 +25,6 @@ class DeployInstructions(ABC):
         remote_state: RemoteState,
         function_exists: bool,
     ) -> list[Instruction]:
-        print("deployment instruction name:", name)
-        print("deployment instruction region:", self._region)
-        print("deployment instruction provider:", self._provider.value)
-        print("deployment role name:", role.name)
         self._config = self._get_config(providers, self._provider.value)
         instructions: list[Instruction] = []
         messaging_topic_identifier_varname = f"{name}_messaging_topic"
