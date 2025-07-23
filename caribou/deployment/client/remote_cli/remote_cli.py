@@ -339,9 +339,7 @@ def is_aws_framework_deployed(
     return True
 
 
-def is_gcp_framework_deployed(
-    gcp_remote_client: GCPRemoteClient, verbose: bool = True
-) -> bool:
+def is_gcp_framework_deployed(gcp_remote_client: GCPRemoteClient, verbose: bool = True) -> bool:
     if not gcp_remote_client.resource_exists(
         Resource(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME, "service_account")
     ):  # For service account

@@ -34,15 +34,16 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
             if self._google_api_key is None and not self._integration_test_on:
                 raise ValueError("GOOGLE_API_KEY environment variable not set")
 
-            # Should be available in most if not all regions
-            # But just to be sure, we use us-east-1 (As we know it's available there)
-            self._aws_ec2_client = boto3.client("ec2", region_name="us-east-1")
-
-            self._aws_pricing_client = boto3.client("pricing", region_name="us-east-1")  # Must be in us-east-1
-            self._aws_region_name_to_code: dict[str, str] = {}
             self._gcp_region_name_to_code: dict[str, str] = {}
             self._gcp_catalog_client: billing_v1.CloudCatalogClient = billing_v1.CloudCatalogClient()
             self._gcp_cloud_run_service_id: str | None = None
+
+        # Should be available in most if not all regions
+        # But just to be sure, we use us-east-1 (As we know it's available there)
+        self._aws_ec2_client = boto3.client("ec2", region_name="us-east-1")
+
+        self._aws_pricing_client = boto3.client("pricing", region_name="us-east-1")  # Must be in us-east-1
+        self._aws_region_name_to_code: dict[str, str] = {}
 
     def retrieve_location(self, name: str) -> tuple[float, float]:
         google_maps = googlemaps.Client(key=self._google_api_key)
