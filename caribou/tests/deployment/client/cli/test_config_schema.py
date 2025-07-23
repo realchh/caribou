@@ -18,11 +18,31 @@ from caribou.deployment.common.config.config_schema import (
 
 
 class TestConfigSchema(unittest.TestCase):
-    def test_config_conforms_to_schema(self):
+    def test_aws_config_conforms_to_schema(self):
         current_dir = Path(__file__).parent.parent.parent.parent.parent
         config_file = os.path.join(
             current_dir,
-            "deployment/client/cli/aws_template/.caribou/config.yml",
+            "deployment/client/cli/templates/aws_template/.caribou/config.yml",
+        )
+
+        with open(config_file, "r") as f:
+            config_file = f.read()
+
+        if not config_file:
+            self.assertFalse(True)
+
+        config_dict = yaml.safe_load(config_file)
+
+        try:
+            ConfigSchema(**config_dict)
+        except ValidationError as e:
+            self.assertFalse(True, e)
+
+    def test_gcp_config_conforms_to_schema(self):
+        current_dir = Path(__file__).parent.parent.parent.parent.parent
+        config_file = os.path.join(
+            current_dir,
+            "deployment/client/cli/templates/gcp_template/.caribou/config.yml",
         )
 
         with open(config_file, "r") as f:
