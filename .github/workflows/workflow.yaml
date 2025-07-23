@@ -13,6 +13,11 @@ defaults:
   run:
     shell: bash -l {0}
 
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
 jobs:
   pep8:
     runs-on: ubuntu-latest
@@ -45,6 +50,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     permissions:
+      contents: read
       pull-requests: write
       id-token: write
     steps:
@@ -99,7 +105,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
-    permissions:
+    permissions: 
       contents: read
       id-token: write
     steps:
