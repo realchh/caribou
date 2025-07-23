@@ -19,7 +19,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run black
@@ -32,7 +32,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run pylint
@@ -47,9 +47,15 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider:  projects/809845967121/locations/global/workloadIdentityPools/github/providers/my-repo
+          service_account: caribou-github-actions@caribou-460422.iam.gserviceaccount.com
       - name: Run tests
         run: |
           set -e
@@ -67,7 +73,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run mypy
@@ -80,7 +86,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run isort
@@ -93,9 +99,15 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider:  projects/809845967121/locations/global/workloadIdentityPools/github/providers/my-repo
+          service_account: caribou-github-actions@caribou-460422.iam.gserviceaccount.com
       - name: Run integration tests
         run: |
           poetry run python integration_tests/run_integration_tests.py
@@ -105,7 +117,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup Go
         uses: ./.github/actions/go
       - name: Initialize Go module
