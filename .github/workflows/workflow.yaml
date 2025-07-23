@@ -13,11 +13,6 @@ defaults:
   run:
     shell: bash -l {0}
 
-permissions:
-  contents: read
-  id-token: write
-  pull-requests: write
-
 jobs:
   pep8:
     runs-on: ubuntu-latest
@@ -49,20 +44,12 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
-#    permissions:
-#      contents: read
-#      pull-requests: write
-#      id-token: write
+    permissions:
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
-      - id: auth
-        name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider:  projects/809845967121/locations/global/workloadIdentityPools/github/providers/my-repo
-          service_account: caribou-github-actions@caribou-460422.iam.gserviceaccount.com
       - name: Run tests
         run: |
           set -e
@@ -105,19 +92,10 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
-#    permissions:
-#      contents: read
-#      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
-      - id: auth
-        name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider:  projects/809845967121/locations/global/workloadIdentityPools/github/providers/my-repo
-          service_account: caribou-github-actions@caribou-460422.iam.gserviceaccount.com
       - name: Run integration tests
         run: |
           poetry run python integration_tests/run_integration_tests.py
