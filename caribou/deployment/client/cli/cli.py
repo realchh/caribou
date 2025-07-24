@@ -244,7 +244,11 @@ def remove(workflow_id: str, remote: bool) -> None:
 @click.option("--vcpu", "-c", help="The desired amount of vCPU. Only used for GCP.")
 @click.pass_context
 def deploy_remote_cli(
-    ctx: click.Context, memory: Optional[str], timeout: Optional[str], ephemeral_storage: Optional[str], vcpu: Optional[str]
+    ctx: click.Context,
+    memory: Optional[str],
+    timeout: Optional[str],
+    ephemeral_storage: Optional[str],
+    vcpu: Optional[str],
 ) -> None:
     project_dir = ctx.obj["project_dir"]
 

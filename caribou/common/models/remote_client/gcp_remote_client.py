@@ -42,9 +42,10 @@ from caribou.common.constants import (
     FIRESTORE_TTL_FIELD_NAME,
     GLOBAL_GCP_SYSTEM_REGION,
     REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
+    REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
-    SYNC_TABLE_TTL, REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME,
+    SYNC_TABLE_TTL,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import (
