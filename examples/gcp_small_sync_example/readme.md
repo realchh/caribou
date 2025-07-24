@@ -9,7 +9,7 @@ poetry run caribou deploy
 And then run the benchmark with the following command:
 
 ```bash
-poetry run caribou run small_sync_example-version_number -a '{"execute_1": true, "execute_2": false, "execute_1": true}'
+poetry run caribou run gcp_small_sync_example-version_number -a '{"execute_1": true, "execute_2": false, "execute_1": true}'
 ```
 
 Where the first two execute can be used to invoke the first sync function and the third execute can be used to invoke the second sync function.
@@ -30,5 +30,5 @@ The logic of whether a sync node runs is the following:
 To remove the benchmark, you can use the following command:
 
 ```bash
-poetry run caribou remove small_sync_example-version_number
+poetry run caribou remove gcp_small_sync_example-version_number
 ```

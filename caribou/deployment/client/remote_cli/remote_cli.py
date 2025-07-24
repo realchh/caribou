@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import traceback
+from time import sleep
 from typing import Dict, List, Optional
 
 from cron_descriptor import Options, get_description
@@ -135,7 +136,7 @@ def deploy_aws_remote_framework(project_dir: str, timeout: int, memory_size: int
             zip_contents = f.read()
 
         # Retrieve the required environment variables
-        desired_env_vars = ["GOOGLE_API_KEY", "ELECTRICITY_MAPS_AUTH_TOKEN", "CARIBOU_DEFAULT_PROVIDER"]
+        desired_env_vars = ["GOOGLE_API_KEY", "ELECTRICITY_MAPS_AUTH_TOKEN"]
         env_vars = _get_env_vars(desired_env_vars)
 
         # Deploy to AWS
@@ -174,6 +175,7 @@ def deploy_gcp_remote_framework(
 
     # Create a role
     service_account_email = gcp_remote_client.get_service_account("caribou-deployment-policy")
+    sleep(3)
     service_account_email = gcp_remote_client.create_role("caribou-deployment-policy", iam_policies_content, None)
 
     # Delete remote cli if exists.

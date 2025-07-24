@@ -17,6 +17,7 @@ from caribou.common.constants import (
     GLOBAL_TIME_ZONE,
     HOME_REGION_THRESHOLD,
     LOG_VERSION,
+    MAX_GCP_TRANSFER_SIZE,
     MAX_TRANSFER_SIZE,
     MAX_WORKERS,
     MAXIMUM_HOPS_FROM_CLIENT_REQUEST,
@@ -164,6 +165,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 raise RuntimeError(f"Could not find function with name {function_name}, was the function registered?")
         return successors
 
+    # pylint: disable=too-many-statements
     def invoke_serverless_function(
         self,
         function: Callable[..., Any],
@@ -324,7 +326,13 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/publish.html
         # For safety, we will set the limit to 256,000 bytes (250 KB)
         payload_size_byte = len(json_payload.encode("utf-8"))
-        if payload_size_byte > MAX_TRANSFER_SIZE:
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+        if provider == Provider.GCP.value:
+            max_size = MAX_GCP_TRANSFER_SIZE
+        else:
+            max_size = MAX_TRANSFER_SIZE
+
+        if payload_size_byte > max_size:
             log_message = (
                 f"DEBUG_MESSAGE: PAYLOAD_SIZE "
                 f"({payload_size_byte / (1024**3)}) GB "
@@ -339,7 +347,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             raise ValueError(
                 f"Payload size is too large, please reduce the size of the payload. "
                 f"Current payload size is {payload_size_byte} bytes, please limit to"
-                f"under 250,000 bytes."
+                f"under {max_size} bytes."
             )
 
         # Start the invocation timer AFTER the successor instance name has been determined

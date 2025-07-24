@@ -3,7 +3,7 @@ from typing import Any
 import json
 from caribou.deployment.client import CaribouWorkflow
 
-workflow = CaribouWorkflow(name="small_sync_example", version="0.0.1")
+workflow = CaribouWorkflow(name="aws_small_sync_example", version="0.0.1")
 
 
 @workflow.serverless_function(

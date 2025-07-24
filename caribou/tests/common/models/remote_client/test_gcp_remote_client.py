@@ -17,31 +17,57 @@ class TestGCPRemoteClient(unittest.TestCase):
         "caribou.common.models.remote_client.gcp_remote_client.service_account.Credentials.from_service_account_file"
     )
     def setUp(self, mock_service_account, mock_default_auth):
+        # Start all the patchers
+        self.patcher_storage = patch("caribou.common.models.remote_client.gcp_remote_client.storage")
+        self.patcher_firestore = patch("caribou.common.models.remote_client.gcp_remote_client.firestore")
+        self.patcher_firestore_admin = patch("caribou.common.models.remote_client.gcp_remote_client.firestore_admin_v1")
+        self.patcher_pubsub = patch("caribou.common.models.remote_client.gcp_remote_client.pubsub_v1")
+        self.patcher_run = patch("caribou.common.models.remote_client.gcp_remote_client.run_v2")
+        self.patcher_iam = patch("caribou.common.models.remote_client.gcp_remote_client.IAMClient")
+        self.patcher_rm = patch("caribou.common.models.remote_client.gcp_remote_client.resourcemanager_v3")
+        self.patcher_ar = patch("caribou.common.models.remote_client.gcp_remote_client.artifactregistry_v1")
+        self.patcher_logging = patch("caribou.common.models.remote_client.gcp_remote_client.logging_v2")
+        self.patcher_monitoring = patch("caribou.common.models.remote_client.gcp_remote_client.monitoring_v3")
+        self.patcher_scheduler = patch("caribou.common.models.remote_client.gcp_remote_client.scheduler_v1")
+        self.patcher_auth = patch(
+            "caribou.common.models.remote_client.gcp_remote_client.google_auth_default",
+            return_value=(MagicMock(), "test-project-id"),
+        )
+        self.patcher_sa_creds = patch("caribou.common.models.remote_client.gcp_remote_client.service_account")
+
+        self.mock_storage = self.patcher_storage.start()
+        self.mock_firestore = self.patcher_firestore.start()
+        self.mock_firestore_admin = self.patcher_firestore_admin.start()
+        self.mock_pubsub = self.patcher_pubsub.start()
+        self.mock_run = self.patcher_run.start()
+        self.mock_iam = self.patcher_iam.start()
+        self.mock_rm = self.patcher_rm.start()
+        self.mock_ar = self.patcher_ar.start()
+        self.mock_logging = self.patcher_logging.start()
+        self.mock_monitoring = self.patcher_monitoring.start()
+        self.mock_scheduler = self.patcher_scheduler.start()
+        self.mock_auth = self.patcher_auth.start()
+        self.mock_sa_creds = self.patcher_sa_creds.start()
+
+        # This ensures that we stop all patchers after the test runs
+        self.addCleanup(self.patcher_storage.stop)
+        self.addCleanup(self.patcher_firestore.stop)
+        self.addCleanup(self.patcher_firestore_admin.stop)
+        self.addCleanup(self.patcher_pubsub.stop)
+        self.addCleanup(self.patcher_run.stop)
+        self.addCleanup(self.patcher_iam.stop)
+        self.addCleanup(self.patcher_rm.stop)
+        self.addCleanup(self.patcher_ar.stop)
+        self.addCleanup(self.patcher_logging.stop)
+        self.addCleanup(self.patcher_monitoring.stop)
+        self.addCleanup(self.patcher_scheduler.stop)
+        self.addCleanup(self.patcher_auth.stop)
+        self.addCleanup(self.patcher_sa_creds.stop)
+
+        # Now it's safe to instantiate the client
         self.project_id = "test-project"
         self.region = "us-central1"
-
-        # Mock credentials
-        mock_creds = MagicMock()
-        mock_creds.project_id = self.project_id
-        mock_default_auth.return_value = (mock_creds, self.project_id)
-
-        # Initialize the client
         self.gcp_client = GCPRemoteClient(project_id=self.project_id, region=self.region)
-
-        # Mock all the service clients
-        self.gcp_client._run_client = MagicMock()
-        self.gcp_client._storage_client = MagicMock()
-        self.gcp_client._firestore_client = MagicMock()
-        self.gcp_client._firestore_admin_client = MagicMock()
-        self.gcp_client._pubsub_publisher_client = MagicMock()
-        self.gcp_client._pubsub_subscriber_client = MagicMock()
-        self.gcp_client._eventarc_client = MagicMock()
-        self.gcp_client._artifact_registry_client = MagicMock()
-        self.gcp_client._iam_admin_client = MagicMock()
-        self.gcp_client._resource_manager_client = MagicMock()
-        self.gcp_client._logging_client = MagicMock()
-        self.gcp_client._monitoring_client = MagicMock()
-        self.gcp_client._scheduling_client = MagicMock()
 
         self.gcp_client.FUNCTION_CREATE_ATTEMPTS = 2
         self.gcp_client.DELAY_TIME = 0

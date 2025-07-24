@@ -22,23 +22,33 @@ import os
 
 class TestProviderRetriever(unittest.TestCase):
     def setUp(self):
-        with (
-            patch("boto3.client") as mock_boto3,
-            patch("caribou.common.utils.str_to_bool") as mock_str_to_bool,
-            patch("googlemaps.Client") as mock_googlemaps_client,
-            patch("google.cloud.billing_v1.CloudCatalogClient") as mock_google_cloud_catalog_client,
-            patch("google.cloud.billing_v1.CloudBillingClient") as mock_google_cloud_billing_client,
-        ):
-            self.remote_client = MagicMock(spec=RemoteClient)
-            mock_boto3.return_value = MagicMock()
+        self.boto3_patcher = patch("boto3.client")
+        self.str_to_bool_patcher = patch("caribou.common.utils.str_to_bool")
+        self.googlemaps_patcher = patch("googlemaps.Client")
+        self.catalog_client_patcher = patch("google.cloud.billing_v1.CloudCatalogClient")
+        self.billing_client_patcher = patch("google.cloud.billing_v1.CloudBillingClient")
+        self.env_patcher = patch.dict("os.environ", {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False"})
 
-            test_environment = {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False"}
+        self.mock_boto3 = self.boto3_patcher.start()
+        self.mock_str_to_bool = self.str_to_bool_patcher.start()
+        self.mock_googlemaps = self.googlemaps_patcher.start()
+        self.mock_catalog_client = self.catalog_client_patcher.start()
+        self.mock_billing_client = self.billing_client_patcher.start()
+        self.env_patcher.start()
 
-            self.env_patcher = patch.dict("os.environ", test_environment)
-            self.env_patcher.start()
+        self.addCleanup(self.boto3_patcher.stop)
+        self.addCleanup(self.str_to_bool_patcher.stop)
+        self.addCleanup(self.googlemaps_patcher.stop)
+        self.addCleanup(self.catalog_client_patcher.stop)
+        self.addCleanup(self.billing_client_patcher.stop)
+        self.addCleanup(self.env_patcher.stop)
 
-            mock_str_to_bool.return_value = False
-            self.provider_retriever = ProviderRetriever(self.remote_client)
+        # Configure default mock behaviors
+        self.mock_str_to_bool.return_value = False
+        self.remote_client = MagicMock(spec=RemoteClient)
+
+        # Now it's safe to instantiate the class under test
+        self.provider_retriever = ProviderRetriever(self.remote_client)
 
     @patch.dict(os.environ, {"AWS_REGION": "us-east-1"})
     def test_retrieve_aws_sns_cost(self):

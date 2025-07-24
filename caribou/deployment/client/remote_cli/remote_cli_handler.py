@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 import flask
 
+from caribou.common.provider import Provider
 from caribou.data_collector.components.carbon.carbon_collector import CarbonCollector
 from caribou.data_collector.components.performance.performance_collector import PerformanceCollector
 from caribou.data_collector.components.provider.provider_collector import ProviderCollector
@@ -98,6 +99,14 @@ def handle_manage_deployments(event: dict[str, Any]) -> dict[str, Any]:
         return {
             "status": 400,
             "message": "Invalid deployment_metrics_calculator_type specified. Allowed values are 'simple', 'go'",
+        }
+
+    provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+    if provider == Provider.GCP.value and deployment_metrics_calculator_type == "go":
+        logger.error("Go deployment metrics calculator is not supported for GCP provider")
+        return {
+            "status": 400,
+            "message": "Go deployment metrics calculator is not supported for GCP provider",
         }
 
     logger.info("Deployment check started, using %s calculator", deployment_metrics_calculator_type)

@@ -237,13 +237,14 @@ def remove(workflow_id: str, remote: bool) -> None:
         Client(workflow_id).remove()
 
 
-@cli.command("deploy_remote_cli", help="Deploy the remote framework cli to AWS Lambda.")
+@cli.command("deploy_remote_cli", help="Deploy the remote framework cli to AWS Lambda/GCP.")
 @click.option("--memory", "-m", help="The desired framework memory in MB.")
 @click.option("--timeout", "-t", help="The desired remote CLI timeout time in seconds.")
 @click.option("--ephemeral_storage", "-s", help="The desired ephemeral storage size of framework in MB.")
+@click.option("--vcpu", "-c", help="The desired amount of vCPU. Only used for GCP.")
 @click.pass_context
 def deploy_remote_cli(
-    ctx: click.Context, memory: Optional[str], timeout: Optional[str], ephemeral_storage: Optional[str]
+    ctx: click.Context, memory: Optional[str], timeout: Optional[str], ephemeral_storage: Optional[str], vcpu: Optional[str]
 ) -> None:
     project_dir = ctx.obj["project_dir"]
 
@@ -279,7 +280,7 @@ def deploy_remote_cli(
 
         # CPU Count (for GCP)
         ## Default 2 vCPU (valid for memory + storage < 8 GB or 8192 MB)
-        cpu: int = _validate_parameter(None, 2, 1, 8, "CPU", "vCPU")
+        cpu: int = _validate_parameter(vcpu, 2, 1, 8, "CPU", "vCPU")
 
         deploy_remote_framework(project_dir, timeout_s, memory_mb, ephemeral_storage_mb, cpu)
 

@@ -44,7 +44,7 @@ from caribou.common.constants import (
     REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
-    SYNC_TABLE_TTL,
+    SYNC_TABLE_TTL, REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.utils import (
@@ -93,7 +93,17 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self._storage_client = storage.Client(project=self._project_id, credentials=self._credentials)
         self._firestore_client = firestore.Client(credentials=self._credentials)
         self._firestore_admin_client = firestore_admin_v1.FirestoreAdminClient(credentials=self._credentials)
-        self._pubsub_publisher_client = pubsub_v1.PublisherClient(credentials=self._credentials)
+
+        batch_settings = pubsub_v1.types.BatchSettings(
+            max_messages=1,  # Max 100 messages per batch
+            max_bytes=10000000,  # Max 10 MB per batch
+            max_latency=0.01,  # Max 0.01s (10ms) to wait before sending
+        )
+
+        self._pubsub_publisher_client = pubsub_v1.PublisherClient(
+            credentials=self._credentials, batch_settings=batch_settings
+        )
+
         self._pubsub_subscriber_client = pubsub_v1.SubscriberClient(credentials=self._credentials)
         self._eventarc_client = eventarc_v1.EventarcClient(credentials=self._credentials)
         self._artifact_registry_client = artifactregistry_v1.ArtifactRegistryClient(credentials=self._credentials)
@@ -867,6 +877,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
         client = self._pubsub_publisher_client
+        print("publishing")
         # compressed json (also change caribou/deployment/client/caribou_workflow.py:1270 to toggle compression)
         # response = client.publish(topic=identifier, data=compress_json_str(message))
         response = client.publish(topic=identifier, data=message.encode("utf-8"))
@@ -1374,19 +1385,34 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         Creates a Cloud Scheduler job that publishes a message to a Pub/Sub topic.
         This topic is assumed to be the one that triggers the target Cloud Run service.
         """
-        job_path = self._scheduling_client.job_path(self._project_id, self._region, rule_name)
-        topic_id = f"{lambda_function_name}_messaging_topic"
-        topic_path = self._pubsub_publisher_client.topic_path(self._project_id, topic_id)
+        # Get the remote CLI cloud run service URI
+        try:
+            service_path = self._run_client.service_path(self._project_id, self._region, lambda_function_name)
+            service = self._run_client.get_service(name=service_path)
+            target_uri = service.uri
+        except google_api_exceptions.NotFound as e:
+            raise RuntimeError(f"Cloud Run service {lambda_function_name} for timer rule not found") from e
 
-        pubsub_target = scheduler_v1.types.PubsubTarget(
-            {
-                "topic_name": topic_path,
-                "data": event_payload.encode("utf-8"),
-            }
+        service_account_id = REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME
+        service_account_email = f"{service_account_id}@{self._project_id}.iam.gserviceaccount.com"
+
+        job_path = self._scheduling_client.job_path(self._project_id, self._region, rule_name)
+
+        oidc_token = scheduler_v1.types.OidcToken(
+            service_account_email=service_account_email,
+            audience=target_uri,
+        )
+
+        http_target = scheduler_v1.types.HttpTarget(
+            uri=target_uri,
+            http_method=scheduler_v1.types.HttpMethod.POST,
+            headers={"Content-Type": "application/json"},
+            body=event_payload.encode("utf-8"),
+            oidc_token=oidc_token,
         )
 
         job = scheduler_v1.Job(
-            {"name": job_path, "schedule": schedule_expression, "time_zone": "Etc/UTC", "pubsub_target": pubsub_target}
+            {"name": job_path, "schedule": schedule_expression, "time_zone": "Etc/UTC", "http_target": http_target}
         )
 
         try:
