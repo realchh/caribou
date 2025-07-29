@@ -4,10 +4,12 @@ from __future__ import annotations
 import ast
 import base64
 import binascii
+import copy
 import json
 import logging
 import os
 import random
+import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
@@ -112,7 +114,10 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self._function_names: set[str] = set()
         self._endpoint: Endpoints | None = None
 
-        self._current_workflow_placement_decision: dict[str, Any] = {}
+        # self._current_workflow_placement_decision: dict[str, Any] = {}
+
+        # Make workflow placement decision thread-local instead of shared across all executions
+        self._thread_local: threading.local = threading.local()
 
         # For thread pool -> Invoke successor functions asynchronously
         self._thread_pool: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
@@ -121,7 +126,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # For logging
         ## This will be overritten by the first function that is called
         ## Just here as a placeholder to avoid using None
-        self._function_start_time: datetime = datetime.now(GLOBAL_TIME_ZONE)
+        # self._function_start_time: datetime = datetime.now(GLOBAL_TIME_ZONE)
 
         # For redirecting the function to the home region
         self._home_region_threshold: float = HOME_REGION_THRESHOLD  # fractional % of the time run in home region
@@ -129,7 +134,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # Track the number of hops from client request
         # To forcefully terminate the workflow if it exceeds a certain number
         ## This will be overritten by input function arguments
-        self._number_of_hops_from_client_request: int = 0
+        # self._number_of_hops_from_client_request: int = 0
 
         # Cache the remote clients (one per provider-region pair)
         self._remote_clients: dict[str, RemoteClient] = {}
@@ -140,7 +145,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         return self._endpoint
 
     def get_run_id(self) -> str:
-        return self._current_workflow_placement_decision["run_id"]
+        return self.get_workflow_placement_decision()["run_id"]
 
     def get_successors(self, function: CaribouFunction) -> list[CaribouFunction]:
         """
@@ -196,7 +201,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             transmission_taint: str,
             conditional: bool,
         ) -> None:
-            time_from_function_start = (invocation_start_time - self._function_start_time).total_seconds()
+            time_from_function_start = (invocation_start_time - self._get_function_start_time()).total_seconds()
 
             provider, region, identifier = self.get_successor_workflow_placement_decision(
                 successor_instance_name, workflow_placement_decision
@@ -310,7 +315,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         payload_wrapper: dict[str, Any] = {
             "workflow_placement_decision": successor_workflow_placement_decision_dictionary,
             "transmission_taint": transmission_taint,
-            "number_of_hops_from_client_request": self._number_of_hops_from_client_request,
+            "number_of_hops_from_client_request": self._get_number_of_hops(),
         }
         alternative_json_payload: Optional[str] = None
         if payload:
@@ -401,7 +406,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 for predecessor_and_sync in instance.get("dependent_sync_predecessors", []):
                     predecessor = predecessor_and_sync[0]
                     sync_node = predecessor_and_sync[1]
-
                     response_size, consumed_capacity = self._inform_and_invoke_sync_node(
                         workflow_placement_decision, sync_node, predecessor, sync_nodes_invoked_logs
                     )
@@ -459,7 +463,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             payload_wrapper: dict[str, Any] = {
                 "workflow_placement_decision": successor_workflow_placement_decision,
                 "transmission_taint": transmission_taint,
-                "number_of_hops_from_client_request": self._number_of_hops_from_client_request,
+                "number_of_hops_from_client_request": self._get_number_of_hops(),
             }
             # payload_wrapper["workflow_placement_decision"] = successor_workflow_placement_decision
             # payload_wrapper["transmission_taint"] = transmission_taint
@@ -555,7 +559,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self, workflow_placement_decision: dict[str, Any], next_instance_name: str
     ) -> dict[str, Any]:
         # Copy the workflow_placement decision
-        successor_workflow_placement_decision = workflow_placement_decision.copy()
+        successor_workflow_placement_decision = copy.deepcopy(workflow_placement_decision)
         # Update the current instance name to the next instance name
         successor_workflow_placement_decision["current_instance_name"] = next_instance_name
         return successor_workflow_placement_decision
@@ -603,7 +607,31 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         The structure of the workflow placement decision is explained in the
         `docs/component_interaction.md` file under `Workflow Placement Decision`.
         """
-        return self._current_workflow_placement_decision
+        if not hasattr(self._thread_local, "current_workflow_placement_decision"):
+            raise RuntimeError("Workflow placement decision not set for current thread")
+        return self._thread_local.current_workflow_placement_decision
+
+    def _set_workflow_placement_decision(self, workflow_placement_decision: dict[str, Any]) -> None:
+        """
+        Set the workflow placement decision for the current thread.
+        """
+        self._thread_local.current_workflow_placement_decision = workflow_placement_decision
+
+    def _get_function_start_time(self) -> datetime:
+        if not hasattr(self._thread_local, "function_start_time"):
+            self._thread_local.function_start_time = datetime.now(GLOBAL_TIME_ZONE)
+        return self._thread_local.function_start_time
+
+    def _set_function_start_time(self, start_time: datetime) -> None:
+        self._thread_local.function_start_time = start_time
+
+    def _get_number_of_hops(self) -> int:
+        if not hasattr(self._thread_local, "number_of_hops_from_client_request"):
+            self._thread_local.number_of_hops_from_client_request = 0
+        return self._thread_local.number_of_hops_from_client_request
+
+    def _set_number_of_hops(self, hops: int) -> None:
+        self._thread_local.number_of_hops_from_client_request = hops
 
     def get_predecessor_data(self) -> list[dict[str, Any]]:
         """
@@ -828,7 +856,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             handler_name = name if name is not None else func.__name__
 
             def wrapper(*args, **kwargs):  # type: ignore  # pylint: disable=unused-argument
-                self._function_start_time = datetime.now(GLOBAL_TIME_ZONE)
+                self._set_function_start_time(datetime.now(GLOBAL_TIME_ZONE))
 
                 # Retrieve the argument and check if it it is valid
                 caribou_wrapper_argument, size_of_input_payload_gb = self._retrieve_caribou_wrapper_argument(
@@ -839,14 +867,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 self._ensure_hops_within_constraints(caribou_wrapper_argument)
 
                 # Retrieve the workflow placement decision from the wrapper
-                self._current_workflow_placement_decision = (
-                    workflow_placement_decision
-                ) = self._retrieve_wpd_from_wrapper_or_system(
+                workflow_placement_decision = self._retrieve_wpd_from_wrapper_or_system(
                     caribou_wrapper_argument,
                     entry_point,
                     allow_placement_decision_override,
                     handler_name,
                 )
+
+                self._set_workflow_placement_decision(workflow_placement_decision)
+
                 if entry_point and self._need_to_redirect(caribou_wrapper_argument, workflow_placement_decision):
                     # If the function is an entry point and needs to be redirected, redirect it
                     return self._redirect_to_desired_provider_and_region(
@@ -874,11 +903,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
                     end_time = datetime.now(GLOBAL_TIME_ZONE)
 
-                    user_execution_time = (user_code_end_time - self._function_start_time).total_seconds()
+                    user_execution_time = (user_code_end_time - self._get_function_start_time()).total_seconds()
                     log_message = (
                         f'EXECUTED: INSTANCE ({workflow_placement_decision["current_instance_name"]}) with '
                         f"USER_EXECUTION_TIME ({user_execution_time}) s and "
-                        f"TOTAL_EXECUTION_TIME ({(end_time - self._function_start_time).total_seconds()}) s"
+                        f"TOTAL_EXECUTION_TIME ({(end_time - self._get_function_start_time()).total_seconds()}) s"
                     )
                     self.log_for_retrieval(
                         log_message,
@@ -935,7 +964,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             if time_first_recieved is not None:
                 # If the time_first_recieved is in the argument, convert it to a proper format
                 datetime_first_received = datetime.strptime(time_first_recieved, TIME_FORMAT)
-                init_latency_first_received = str((self._function_start_time - datetime_first_received).total_seconds())
+                init_latency_first_received = str(
+                    (self._get_function_start_time() - datetime_first_received).total_seconds()
+                )
             else:
                 # datetime_first_received = self._function_start_time
                 init_latency_first_received = str(0.0)
@@ -949,7 +980,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
                 # Get s from the time difference
                 # Note due to desync between client and server, the time difference can be negative
-                init_latency_from_client = str((self._function_start_time - datetime_invoked_at_client).total_seconds())
+                init_latency_from_client = str(
+                    (self._get_function_start_time() - datetime_invoked_at_client).total_seconds()
+                )
 
             # Retrieve the user payload size if available (Aka if this is redirected)
             # Otherwise the size of input is the size of the user payload
@@ -965,7 +998,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             # As this can be used to determine when the message was first recieved.
             wpd_data_size = workflow_placement_decision.get("data_size", 0.0)
             wpd_consumed_read_capacity = workflow_placement_decision.get("consumed_read_capacity", 0.0)
-            time_from_function_start = (datetime.now(GLOBAL_TIME_ZONE) - self._function_start_time).total_seconds()
+            time_from_function_start = (
+                datetime.now(GLOBAL_TIME_ZONE) - self._get_function_start_time()
+            ).total_seconds()
             log_message = (
                 f"ENTRY_POINT: Entry Point INSTANCE "
                 f'({workflow_placement_decision["current_instance_name"]}) '
@@ -980,16 +1015,16 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             )
             if overriden_workflow_placement_size is not None:
                 log_message += f" OVERRIDEN_WORKFLOW_PLACEMENT_SIZE ({overriden_workflow_placement_size}) GB"
-            self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._function_start_time)
+            self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._get_function_start_time())
         # Log the Invocation and transmission taint for the function
         # NOTE: Ensure that the log time is the time when the function first recieved the message
         # As this is used to calculate the transmission latency.
         log_message = (
             f'INVOKED: INSTANCE ({workflow_placement_decision["current_instance_name"]}) '
             f"called with TAINT ({transmission_taint}) "
-            f"with NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._number_of_hops_from_client_request})"
+            f"with NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._get_number_of_hops()})"
         )
-        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._function_start_time)
+        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._get_function_start_time())
 
     def _retrieve_wpd_from_wrapper_or_system(
         self,
@@ -1061,11 +1096,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         redirect_payload: dict[str, Any] = {
             "payload": caribou_wrapper_argument.get("payload", {}),
             "workflow_placement_decision": workflow_placement_decision,
-            "time_first_recieved": self._function_start_time.strftime(TIME_FORMAT),
+            "time_first_recieved": self._get_function_start_time().strftime(TIME_FORMAT),
             "transmission_taint": transmission_taint,
             "permit_redirection": False,  # IMPORTANT: Do not allow further redirections
             "redirected": True,  # IMPORTANT: Mark that this request has been redirected
-            "number_of_hops_from_client_request": self._number_of_hops_from_client_request,
+            "number_of_hops_from_client_request": self._get_number_of_hops(),
         }
 
         # Get the time the request was sent from the client (if available)
@@ -1094,7 +1129,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
             # Get s from the time difference
             # Note due to desync between client and server, the time difference can be negative
-            init_latency_from_client = str((self._function_start_time - datetime_invoked_at_client).total_seconds())
+            init_latency_from_client = str(
+                (self._get_function_start_time() - datetime_invoked_at_client).total_seconds()
+            )
 
         # Log the redirection information
         # NOTE: Ensure that the log time is the time when the function first recieved the message
@@ -1110,14 +1147,14 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             f"INPUT_PAYLOAD_SIZE ({size_of_input_payload_gb}) GB "
             f"OUTPUT_PAYLOAD_SIZE ({size_of_output_payload_gb}) GB "
             f"Invoking IDENTIFIER ({first_function_identifier}) with TAINT ({transmission_taint}) "
-            f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._number_of_hops_from_client_request}) "
+            f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._get_number_of_hops()}) "
             f"INVOCATION_TIME_FROM_FUNCTION_START "
-            f"({(invocation_start_time - self._function_start_time).total_seconds()}) s and "
+            f"({(invocation_start_time - self._get_function_start_time()).total_seconds()}) s and "
             f"FINISH_TIME_FROM_INVOCATION_START "
             f"({(invocation_finish_time - invocation_start_time).total_seconds()}) s "
             f"INIT_LATENCY_FROM_CLIENT ({init_latency_from_client}) s"
         )
-        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._function_start_time)
+        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._get_function_start_time())
 
         # Log the CPU model (From Redirector)
         self._log_cpu_model(workflow_placement_decision, True)
@@ -1221,7 +1258,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ## Note: Here we intentially log the wpd size and consumed capacity of the retrieved WPD
         ## Regardless of override, as the override is only for testing and debugging purposes,
         ## and thus its size may not be representative of the actual size of the WPD.
-        time_from_function_start = (retrieved_wpd_time - self._function_start_time).total_seconds()
+        time_from_function_start = (retrieved_wpd_time - self._get_function_start_time()).total_seconds()
         log_message = (
             f"RETRIVE_WPD: "
             f'SEND_TO_HOME_DECISION ({workflow_placement_decision["send_to_home_region"]}) '
@@ -1311,27 +1348,29 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         """
 
         # Get the number of redirects from client request
-        self._number_of_hops_from_client_request = (
+        number_of_hops_from_client_request = (
             max(int(caribou_wrapper_argument.get("number_of_hops_from_client_request", 0)), 0) + 1
         )
+
+        self._set_number_of_hops(number_of_hops_from_client_request)
 
         # Check if the number of hops from the client request exceeds the maximum number of hops
         # Used to prevent infinite loops (If the workflow placement decision is incorrect for
         # any reason, this will prevent the function from being called infinitely)
-        if self._number_of_hops_from_client_request > MAXIMUM_HOPS_FROM_CLIENT_REQUEST:
+        if self._get_number_of_hops() > MAXIMUM_HOPS_FROM_CLIENT_REQUEST:
             run_id: str = caribou_wrapper_argument.get("run_id", "UNKNOWN")
 
             # Log the error message
             log_message = (
                 f"EXCEED_HOP_ERROR: "
-                f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._number_of_hops_from_client_request}) "
+                f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._get_number_of_hops()}) "
                 f"EXCEEDS_MAXIMUM_HOPS_FROM_CLIENT_REQUEST ({MAXIMUM_HOPS_FROM_CLIENT_REQUEST})"
             )
             self.log_for_retrieval(log_message, run_id)
             raise RuntimeError(
                 "The number of hops from the client request exceeds the "
                 "maximum number of hops allowed."
-                f"Mumber of hops: {self._number_of_hops_from_client_request}, "
+                f"Mumber of hops: {self._get_number_of_hops()}, "
                 f"Maximum number of hops: {MAXIMUM_HOPS_FROM_CLIENT_REQUEST}"
             )
 
@@ -1363,7 +1402,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             "current_provider": provider,
             "current_region": region,
             "cpu_model": cpu_model,
-            "function_start_time": self._function_start_time.strftime(TIME_FORMAT),
+            "function_start_time": self._get_function_start_time().strftime(TIME_FORMAT),
         }
 
         return caribou_metadata

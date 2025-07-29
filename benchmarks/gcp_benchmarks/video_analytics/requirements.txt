@@ -40,3 +40,7 @@ opentelemetry-exporter-gcp_trace==1.9.0
 opentelemetry-exporter-gcp_logging==1.9.0a0
 
 google-cloud-monitoring
+
+
+google-cloud-scheduler
+

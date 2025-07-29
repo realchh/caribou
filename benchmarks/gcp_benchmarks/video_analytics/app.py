@@ -148,7 +148,7 @@ def recognition(event: dict[str, Any]) -> dict[str, Any]:
         # Make sure the directory exists
         os.makedirs(os.path.dirname(local_decode_filepath), exist_ok=True)
 
-        # Download the zip file of image shards from S3
+        # Download the zip file of image shards from Google Cloud Storage
         client = storage.Client()
         bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(decoded_filepath)
@@ -182,7 +182,7 @@ def recognition(event: dict[str, Any]) -> dict[str, Any]:
                 # Add the result to the list
                 recognition_results[frame_idx] = result
         
-        # Upload the results to S3
+        # Upload the results to Google Cloud Storage
         recognition_filepath = f"output/{output_folder_name}/intermediate_files/recognition_results-{partition_id}.json"
         with open(os.path.join(tmp_dir, "recognition_results.json"), 'w') as f:
             json.dump(recognition_results, f)
@@ -225,8 +225,7 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
         consolidated_labels_dict = {}
         for result in results:
             recognition_filepath = result["recognition_filepath"]
-            print(f"DEBUG: Downloading file {recognition_filepath} from GCS...")
-            # Download the recognition results from S3
+            # Download the recognition results from Google Cloud Storage
             blob = bucket.blob(recognition_filepath)
 
             max_retries = 3
@@ -262,7 +261,7 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
             top_results_str = " ), (".join([f"{image_net_labels[idx]}: {percentage}%" for (idx, percentage) in frame_top_five_recognition_results]).strip()
             ordered_results.append(f"{frame}: [( {top_results_str} )]")
 
-        # Upload the result to S3
+        # Upload the result to Google Cloud Storage
         remote_consolidation_results_path = f"output/{output_folder_name}/resulting_imagenet_labels.txt"
         local_consolidation_results_path = os.path.join(tmp_dir, f"video_frame_imagenet_labels.txt")
         with open(local_consolidation_results_path, 'w') as f:
@@ -283,7 +282,7 @@ def video_analytics_streaming(video_name: str, output_folder_name: str) -> str:
         # Make sure the directory exists
         os.makedirs(os.path.dirname(local_filepath), exist_ok=True)
 
-        # Download the file from S3
+        # Download the file from Google Cloud Storage
         client = storage.Client()
         bucket = client.bucket(gcp_bucket_name)
         blob = bucket.blob(remote_filepath)
@@ -352,21 +351,21 @@ def video_analytics_decode(tmp_dir: str, local_streaming_filepath: str, output_f
         frame_count += 1
     print(f"Frames processed for partition {partition_id}: {frame_count}")
 
-    # Now we have all the frames in the folder, we can zip them and upload them to S3
+    # Now we have all the frames in the folder, we can zip them and upload them to Google Cloud Storage
     # Create a zip file
     zip_filename = f"decoded-{partition_id}.zip"
     local_zip_filepath = os.path.join(tmp_dir, zip_filename)
     os.makedirs(os.path.dirname(local_zip_filepath), exist_ok=True)
     zip_folder(decode_folder_local_path, local_zip_filepath)
 
-    # Upload the zip file to S3
+    # Upload the zip file to Google Cloud Storage
     remote_decoded_zip_filepath = f"output/{output_folder_name}/intermediate_files/{zip_filename}"
     client = storage.Client()
     bucket = client.bucket(gcp_bucket_name)
     blob = bucket.blob(remote_decoded_zip_filepath)
     blob.upload_from_filename(local_zip_filepath)
 
-    # Return the S3 path to the zip file
+    # Return the Google Cloud Storage path to the zip file
     return remote_decoded_zip_filepath
 
 def calculate_fanout_num(local_streaming_filepath: str, desired_frames_per_partition: int = 200) -> int:

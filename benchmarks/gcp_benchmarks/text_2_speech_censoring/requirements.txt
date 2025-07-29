@@ -45,3 +45,7 @@ opentelemetry-exporter-gcp_logging==1.9.0a0
 numpy==2.2.1
 
 google-cloud-monitoring
+
+
+google-cloud-scheduler
+

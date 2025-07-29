@@ -470,7 +470,6 @@ class DeploymentPackager:
 
     def _determine_home_provider(self) -> str:
         home_region = self._config.home_region
-        print(home_region)
         if isinstance(home_region, dict):
             return str(home_region.get("provider", "aws")).lower()
         if isinstance(home_region, str):

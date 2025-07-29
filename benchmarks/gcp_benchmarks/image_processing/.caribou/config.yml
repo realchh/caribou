@@ -1,5 +1,5 @@
 workflow_name: "image_processing"
-workflow_version: "0.0.3"
+workflow_version: "0.0.1"
 iam_policy_file: "iam_policy.json"
 home_region:
   provider: "gcp"

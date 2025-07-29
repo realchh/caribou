@@ -132,9 +132,6 @@ Since the AWS lambda environment restricts us from using Docker, we have to migr
 
 # GCP Support
 ## GCP Account Access
-
-Disclaimer: GCP Support is currently experimental. Use it at your own risk.
-
 To run the framework, you first need to setup a [GCP project](console.cloud.google.com).
 
 Then, install the [gcloud CLI](https://cloud.google.com/sdk/docs/install#linux) using these commands:
@@ -188,6 +185,11 @@ For GCP, we are using firestore to store our key-value pairs. Please create a de
 - Use the default database id "(default)". Using this id allows you to take advantage of firestore's [free quota](https://firebase.google.com/docs/firestore/quotas#free-quota).
 - Choose your default system region (e.g., us-east1) to be the database region.
 - Click on "CREATE DATABASE". Your firestore database will then be successfully created. This may take a while.
+
+To do this step, you could also use the following command. Change the region here to your preferred default system region. Here, we are using `us-east1` as our default system region.
+```
+gcloud firestore databases create --location=us-east1
+```
 
 ## Gcloud authentication for the framework
 `gcloud init` only sets up the authentication for the command line. For the python scripts and framework, you need to

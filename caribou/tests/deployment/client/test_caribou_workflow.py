@@ -44,6 +44,14 @@ class TestCaribouWorkflow(unittest.TestCase):
             return_value=("provider1", "region", "test_func", "123")
         )
 
+        # Clear any existing thread-local data
+        if hasattr(self.workflow._thread_local, "current_workflow_placement_decision"):
+            delattr(self.workflow._thread_local, "current_workflow_placement_decision")
+        if hasattr(self.workflow._thread_local, "function_start_time"):
+            delattr(self.workflow._thread_local, "function_start_time")
+        if hasattr(self.workflow._thread_local, "number_of_hops_from_client_request"):
+            delattr(self.workflow._thread_local, "number_of_hops_from_client_request")
+
     def test_serverless_function(self):
         self.workflow.register_function = Mock()
         self.workflow.get_workflow_placement_decision_from_platform = Mock(
@@ -116,14 +124,15 @@ class TestCaribouWorkflow(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(self.workflow._current_workflow_placement_decision, {})
+        with self.assertRaises(RuntimeError):
+            self.workflow.get_workflow_placement_decision()
 
         argument_raw = {"Records": [{"Sns": {"Message": '{"payload": 2}'}}]}
 
         self.assertEqual(test_func(argument_raw), 4)
 
         self.assertEqual(
-            self.workflow._current_workflow_placement_decision["current_instance_name"],
+            self.workflow.get_workflow_placement_decision()["current_instance_name"],
             "test_func",
         )
 
@@ -197,7 +206,8 @@ class TestCaribouWorkflow(unittest.TestCase):
         self.assertEqual(registered_func.__name__, "test_func")
         self.assertEqual(args[1:], ("test_func", False, {}, [], False))
 
-        self.assertEqual(self.workflow._current_workflow_placement_decision, {})
+        with self.assertRaises(RuntimeError):
+            self.workflow.get_workflow_placement_decision()
 
         self.assertEqual(
             test_func(
@@ -226,7 +236,7 @@ class TestCaribouWorkflow(unittest.TestCase):
 
         # Check if the workflow_placement_decision attribute was set correctly
         self.assertEqual(
-            self.workflow._current_workflow_placement_decision,
+            self.workflow.get_workflow_placement_decision(),
             {
                 "workflow_placement": {
                     "test_instance_1": {
@@ -838,8 +848,8 @@ class TestCaribouWorkflow(unittest.TestCase):
             self.workflow.get_successors(function_obj_5)
 
     def test_get_workflow_placement_decision(self):
-        self.workflow._current_workflow_placement_decision = "decision"
-        self.assertEqual(self.workflow.get_workflow_placement_decision(), "decision")
+        self.workflow._set_workflow_placement_decision({"decision": "A"})
+        self.assertEqual(self.workflow.get_workflow_placement_decision(), {"decision": "A"})
 
     def test_get_next_instance_name(self):
         workflow_placement_decision = {
@@ -1343,6 +1353,65 @@ class TestCaribouWorkflow(unittest.TestCase):
                 environment_variables,
                 allow_placement_decision_override,
             )
+
+    def test_set_and_get_number_of_hops(self):
+        """Test thread-local number of hops functionality"""
+        hops = 5
+        self.workflow._set_number_of_hops(hops)
+        self.assertEqual(self.workflow._get_number_of_hops(), hops)
+
+    def test_thread_local_defaults(self):
+        """Test that thread-local variables have proper defaults"""
+        from datetime import datetime
+
+        # Function start time should default to current time
+        start_time = self.workflow._get_function_start_time()
+        self.assertIsInstance(start_time, datetime)
+
+        # Number of hops should default to 0
+        hops = self.workflow._get_number_of_hops()
+        self.assertEqual(hops, 0)
+
+    def test_get_workflow_placement_decision_not_set(self):
+        """Test that accessing WPD before it's set raises an error"""
+        with self.assertRaises(RuntimeError):
+            self.workflow.get_workflow_placement_decision()
+
+    def test_thread_isolation(self):
+        """Test that workflow placement decisions are isolated between threads"""
+        import threading
+        import time
+
+        results = {}
+
+        def thread_worker(thread_id, wpd_value):
+            # Each thread sets its own WPD
+            self.workflow._set_workflow_placement_decision({"thread": thread_id, "value": wpd_value})
+            time.sleep(0.1)  # Simulate some work
+            # Each thread should get back its own WPD
+            results[thread_id] = self.workflow.get_workflow_placement_decision()
+
+        threads = []
+        for i in range(3):
+            thread = threading.Thread(target=thread_worker, args=(i, f"value_{i}"))
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        # Verify each thread got its own isolated WPD
+        self.assertEqual(results[0]["value"], "value_0")
+        self.assertEqual(results[1]["value"], "value_1")
+        self.assertEqual(results[2]["value"], "value_2")
+
+    def test_set_and_get_function_start_time(self):
+        """Test thread-local function start time functionality"""
+        from datetime import datetime
+
+        start_time = datetime.now()
+        self.workflow._set_function_start_time(start_time)
+        self.assertEqual(self.workflow._get_function_start_time(), start_time)
 
 
 class TestCustomEncoder(unittest.TestCase):

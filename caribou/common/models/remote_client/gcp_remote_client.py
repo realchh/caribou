@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 import subprocess
 import tempfile
 import time
@@ -29,11 +30,12 @@ from google.cloud import (
     scheduler_v1,
     storage,
 )
+from google.cloud.firestore_v1 import DocumentReference
 from google.cloud.iam_admin_v1 import IAMClient
 from google.iam.v1 import policy_pb2
 from google.oauth2 import id_token, service_account  # pylint: disable=unused-import
 from google.protobuf import field_mask_pb2, timestamp_pb2
-from google.pubsub_v1 import PushConfig
+from google.pubsub_v1 import DeadLetterPolicy, PushConfig, RetryPolicy
 
 from caribou.common.constants import (
     BUFFER_GCP_METRICS_GRACE_PERIOD,
@@ -216,31 +218,79 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     ) -> tuple[list[bool], float, float]:
         client = self._firestore_client
         document = client.collection(SYNC_PREDECESSOR_COUNTER_TABLE).document(workflow_instance_id)
-        tx = client.transaction()
 
-        @firestore.transactional
-        def _transaction(tx: firestore.Transaction) -> tuple[list[bool], dict[str, Any]]:
-            snap = document.get(transaction=tx)
-            data = snap.to_dict()
-            if not data:
-                data = {}
+        # Add retry logic with exponential backoff
+        max_retries = 5
+        base_delay = 0.1
 
-            sync_map: dict[str, bool] = data.get(sync_node_name, {})
+        for attempt in range(max_retries):
+            try:
+                tx = client.transaction()
 
-            if predecessor_name not in sync_map or direct_call:
-                sync_map[predecessor_name] = direct_call
+                @firestore.transactional
+                def _transaction(
+                    tx: firestore.Transaction, document: DocumentReference
+                ) -> tuple[list[bool], dict[str, Any]]:
+                    try:
+                        snap = document.get(transaction=tx)
+                        data = snap.to_dict() or {}
 
-            data[sync_node_name] = sync_map
-            data[FIRESTORE_TTL_FIELD_NAME] = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
-            tx.set(document, data)
-            return list(sync_map.values()), data
+                    except google_api_exceptions.GoogleAPICallError as e:
+                        logger.error("TRANSACTION: Failed to read document: %s", e)
+                        raise
 
-        bool_list, final_doc = _transaction(tx)
-        final_doc["expires_at"] = str(final_doc["expires_at"])
-        consumed_write_capacity = 1.0
-        response_size = len(json.dumps(final_doc).encode()) / (1024**3)
+                    sync_map: dict[str, bool] = data.get(sync_node_name, {})
 
-        return bool_list, response_size, consumed_write_capacity
+                    if not direct_call:
+                        if predecessor_name not in sync_map:
+                            sync_map[predecessor_name] = direct_call
+                    else:
+                        sync_map[predecessor_name] = direct_call
+
+                    data[sync_node_name] = sync_map
+                    data[FIRESTORE_TTL_FIELD_NAME] = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
+
+                    tx.set(document, data, merge=True)
+                    return list(sync_map.values()), data
+
+                bool_list, final_doc = _transaction(tx, document)
+
+                # Serialize and calculate response size
+                final_doc_copy = final_doc.copy()
+                if "expires_at" in final_doc_copy:
+                    final_doc_copy["expires_at"] = str(final_doc_copy["expires_at"])
+                if FIRESTORE_TTL_FIELD_NAME in final_doc_copy:
+                    final_doc_copy[FIRESTORE_TTL_FIELD_NAME] = str(final_doc_copy[FIRESTORE_TTL_FIELD_NAME])
+
+                consumed_write_capacity = 1.0
+                response_size = len(json.dumps(final_doc_copy).encode("utf-8")) / (1024**3)
+
+                return bool_list, response_size, consumed_write_capacity
+
+            except google_api_exceptions.Aborted as e:
+                # Transaction was aborted due to contention, retry with backoff
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
+                    logger.warning("Transaction aborted on attempt %s, retrying in %.2fs: %s", attempt + 1, delay, e)
+                    time.sleep(delay)
+                    continue
+
+                logger.error("Transaction failed after %d attempts due to contention: %s", max_retries, e)
+                return [], 0.0, 0.0
+
+            except google_api_exceptions.GoogleAPICallError as e:
+                logger.error(
+                    "Firestore transaction failed for sync node %s on attempt %d: %s", sync_node_name, attempt + 1, e
+                )
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
+                    time.sleep(delay)
+                    continue
+
+                return [], 0.0, 0.0
+
+        # Should never reach here, but return empty state if all retries failed
+        return [], 0.0, 0.0
 
     def create_sync_tables(self) -> None:
         # Check if table exists
@@ -302,22 +352,52 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         ttl_time = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
 
-        tx = client.transaction()
+        # ArrayUnion is atomic, so no transaction needed - this reduces contention significantly
+        max_retries = 3
+        base_delay = 0.1
 
-        @firestore.transactional
-        def _transaction(tx: firestore.Transaction) -> None:
-            tx.set(
-                document,
-                {
-                    "message": firestore.ArrayUnion([message]),
-                    FIRESTORE_TTL_FIELD_NAME: ttl_time,
-                },
-                merge=True,
-            )
+        for attempt in range(max_retries):
+            try:
+                document.update(
+                    {
+                        "message": firestore.ArrayUnion([message]),
+                        FIRESTORE_TTL_FIELD_NAME: ttl_time,
+                    }
+                )
+                return 1.0
 
-        _transaction(tx)
+            except google_api_exceptions.NotFound:
+                # Document doesn't exist, create it with set()
+                try:
+                    document.set(
+                        {
+                            "message": [message],
+                            FIRESTORE_TTL_FIELD_NAME: ttl_time,
+                        }
+                    )
+                    return 1.0
 
-        return 1.0
+                except google_api_exceptions.GoogleAPICallError as e:
+                    logger.warning("Failed to create document on attempt %d: %s", attempt + 1, e)
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
+                        time.sleep(delay)
+                        continue
+
+                    return 0.0
+
+            except google_api_exceptions.GoogleAPICallError as e:
+                logger.error(
+                    "Firestore update failed for sync node %s on attempt %d: %s", function_name, attempt + 1, e
+                )
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
+                    time.sleep(delay)
+                    continue
+
+                return 0.0
+
+        return 0.0
 
     def get_predecessor_data(
         self,
@@ -379,14 +459,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
-        if cpu is None:
-            cpu = max(1.0, memory_size // 1024)
+        final_cpu = self._get_gcp_cpu_config(cpu, memory_size)
 
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
             env=environment_variables,
-            cpu=cpu,
+            cpu=final_cpu,
             memory_mib=memory_size,
             timeout_s=timeout,
             service_account_email=role_identifier,
@@ -644,11 +723,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
+        final_cpu = self._get_gcp_cpu_config(cpu, memory_size)
+
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
             env=environment_variables,
-            cpu=1.0,
+            cpu=final_cpu,
             memory_mib=memory_size,
             timeout_s=timeout,
             service_account_email=role_identifier,
@@ -847,12 +928,31 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         subscription_path = client.subscription_path(project=self._project_id, subscription=subscription_name)
 
+        # timeout of pub/sub ack has a minimum of 10 seconds and maximum of 600 seconds
+        # https://cloud.google.com/pubsub/docs/subscription-properties#ack_deadline
+        timeout = max(min(timeout, 600), 10)
+
+        dead_letter_topic_id = f"{subscription_name}-dl"
+        dead_letter_topic_path = self.create_pubsub_topic(dead_letter_topic_id)
+
+        dead_letter_policy = DeadLetterPolicy(
+            dead_letter_topic=dead_letter_topic_path,
+            max_delivery_attempts=5,
+        )
+
+        # make it so that pub/sub will retry with an exponential backoff (avoiding retry spam)
+        retry_policy = RetryPolicy()
+
         try:
             response = client.create_subscription(
-                name=subscription_path,
-                topic=topic,
-                push_config=push_config,
-                ack_deadline_seconds=timeout,
+                {
+                    "name": subscription_path,
+                    "topic": topic,
+                    "push_config": push_config,
+                    "ack_deadline_seconds": timeout,
+                    "retry_policy": retry_policy,
+                    "dead_letter_policy": dead_letter_policy,
+                }
             )
         except google_api_exceptions.AlreadyExists:
             return subscription_path
@@ -924,7 +1024,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         doc_ref.set(update_data, merge=True)
 
-    # TODO: GCP capacity = 1/64 RCU
     def get_value_from_table(self, table_name: str, key: str, consistent_read: bool = True) -> tuple[str, float]:
         client = self._firestore_client
         doc = client.collection(table_name).document(key).get()
@@ -1231,7 +1330,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             function_name, image_uri, role_arn, timeout, memory_size, cpu, ephemeral_storage
         )
 
-    # TODO: check this
     def _generate_framework_dockerfile(self, handler: str, env_vars: dict) -> str:
         # Create ENV statements for each environment variable
         env_statements = "\n".join([f'ENV {key}="{value}"' for key, value in env_vars.items()])
@@ -1335,18 +1433,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 f" exceeds 32,768 MB (current size = {memory_and_storage} MB)"
             )
 
-        # CPU and Memory limits from:
-        # https://cloud.google.com/run/docs/configuring/services/memory-limits#cpu-minimum
-        # https://cloud.google.com/run/docs/configuring/services/cpu
-        # this part of code should not be reached, but it is here for safeguarding purposes.
-        if cpu is None:
-            cpu = max(memory_and_storage // 1024, 8)
+        final_cpu = self._get_gcp_cpu_config(cpu, memory_and_storage)
 
         url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
             env=env or {},
-            cpu=cpu,
+            cpu=final_cpu,
             memory_mib=memory_and_storage,
             timeout_s=timeout if timeout >= 1 else 0,
             service_account_email=service_account_email,
@@ -1468,3 +1561,23 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         # This method should not be reached, but it is here to satisfy the interface.
         raise NotImplementedError()
+
+    def _get_gcp_cpu_config(self, cpu: float | None, memory: int) -> float:
+        # CPU and Memory limits from:
+        # https://cloud.google.com/run/docs/configuring/services/memory-limits#cpu-minimum
+        # https://cloud.google.com/run/docs/configuring/services/cpu
+        min_cpu_required = 1.0
+        if memory > 4096:  # More than 4GB
+            min_cpu_required = 2.0
+        if memory > 8192:  # More than 8GB
+            min_cpu_required = 4.0
+        if memory > 16384:  # More than 16GB
+            min_cpu_required = 6.0
+        if memory > 24576:  # More than 24GB
+            min_cpu_required = 8.0
+
+        # Use the user-provided CPU value if it's higher than the minimum required.
+        # Otherwise, use the calculated minimum. This prevents invalid combinations.
+        final_cpu = max(cpu or 1.0, min_cpu_required)
+
+        return final_cpu

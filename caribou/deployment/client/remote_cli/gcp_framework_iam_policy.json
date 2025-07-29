@@ -10,7 +10,8 @@
       "roles/datastore.user",
       "roles/storage.objectAdmin",
       "roles/logging.viewer",
-      "roles/monitoring.viewer"
+      "roles/monitoring.viewer",
+      "roles/run.invoker"
     ]
   }
 }
