@@ -482,6 +482,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_mib: int,
         timeout_s: int,
         service_account_email: str,
+        max_concurrency: int = 10,
     ) -> str:
         client = self._run_client
         parent = f"projects/{self._project_id}/locations/{self._region}"
@@ -494,7 +495,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         template = run_v2.RevisionTemplate(
             {
-                "max_instance_request_concurrency": 80,
+                "max_instance_request_concurrency": max_concurrency,
                 "containers": [container],
                 "timeout": f"{timeout_s}s",
                 "service_account": service_account_email,

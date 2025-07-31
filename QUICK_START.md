@@ -236,7 +236,7 @@ Additionally, the following environment variables must be set before remote depl
 ```bash
 export ELECTRICITY_MAPS_AUTH_TOKEN=<your_token>
 export GOOGLE_API_KEY=<your_key>
-export CARIBOU_DEFAULT_PROVIDER=<aws>
+export CARIBOU_DEFAULT_PROVIDER=aws
 ```
 
 ## Setup Automatic Components (For AWS Remote CLI)
@@ -321,7 +321,7 @@ Additionally, the following environment variables must be set before remote depl
 ```bash
 export ELECTRICITY_MAPS_AUTH_TOKEN=<your_token>
 export GOOGLE_API_KEY=<your_key>
-export CARIBOU_DEFAULT_PROVIDER=<gcp>
+export CARIBOU_DEFAULT_PROVIDER=gcp
 ```
 
 ## Setup Automatic Components (For GCP Remote CLI)

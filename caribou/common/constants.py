@@ -182,6 +182,7 @@ CONDITIONALLY_NOT_INVOKE_TASK_TYPE = "CONDITIONALLY_NOT_INVOKE"
 # Caribou Wrapper parameters
 ## max workers for async invocations
 MAX_WORKERS = 1
+MAX_GCP_WORKERS = 8
 
 ## Orchastration transfer size limitation
 MAX_TRANSFER_SIZE = 256000  # In bytes

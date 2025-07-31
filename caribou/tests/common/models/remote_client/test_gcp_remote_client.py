@@ -505,8 +505,11 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
     """Extended test suite for GCPRemoteClient with comprehensive coverage"""
 
     @patch("google.auth.default")
-    def setUp(self, mock_default_auth):
-        # Start all the patchers (same as original setUp)
+    @patch(
+        "caribou.common.models.remote_client.gcp_remote_client.service_account.Credentials.from_service_account_file"
+    )
+    def setUp(self, mock_service_account, mock_default_auth):
+        # Start all the patchers
         self.patcher_storage = patch("caribou.common.models.remote_client.gcp_remote_client.storage")
         self.patcher_firestore = patch("caribou.common.models.remote_client.gcp_remote_client.firestore")
         self.patcher_firestore_admin = patch("caribou.common.models.remote_client.gcp_remote_client.firestore_admin_v1")
@@ -518,7 +521,11 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         self.patcher_logging = patch("caribou.common.models.remote_client.gcp_remote_client.logging_v2")
         self.patcher_monitoring = patch("caribou.common.models.remote_client.gcp_remote_client.monitoring_v3")
         self.patcher_scheduler = patch("caribou.common.models.remote_client.gcp_remote_client.scheduler_v1")
-        self.patcher_eventarc = patch("caribou.common.models.remote_client.gcp_remote_client.eventarc_v1")
+        self.patcher_auth = patch(
+            "caribou.common.models.remote_client.gcp_remote_client.google_auth_default",
+            return_value=(MagicMock(), "test-project-id"),
+        )
+        self.patcher_sa_creds = patch("caribou.common.models.remote_client.gcp_remote_client.service_account")
 
         self.mock_storage = self.patcher_storage.start()
         self.mock_firestore = self.patcher_firestore.start()
@@ -531,30 +538,31 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         self.mock_logging = self.patcher_logging.start()
         self.mock_monitoring = self.patcher_monitoring.start()
         self.mock_scheduler = self.patcher_scheduler.start()
-        self.mock_eventarc = self.patcher_eventarc.start()
+        self.mock_auth = self.patcher_auth.start()
+        self.mock_sa_creds = self.patcher_sa_creds.start()
 
-        # Add cleanup for all patchers
-        for patcher in [
-            self.patcher_storage,
-            self.patcher_firestore,
-            self.patcher_firestore_admin,
-            self.patcher_pubsub,
-            self.patcher_run,
-            self.patcher_iam,
-            self.patcher_rm,
-            self.patcher_ar,
-            self.patcher_logging,
-            self.patcher_monitoring,
-            self.patcher_scheduler,
-            self.patcher_eventarc,
-        ]:
-            self.addCleanup(patcher.stop)
+        # This ensures that we stop all patchers after the test runs
+        self.addCleanup(self.patcher_storage.stop)
+        self.addCleanup(self.patcher_firestore.stop)
+        self.addCleanup(self.patcher_firestore_admin.stop)
+        self.addCleanup(self.patcher_pubsub.stop)
+        self.addCleanup(self.patcher_run.stop)
+        self.addCleanup(self.patcher_iam.stop)
+        self.addCleanup(self.patcher_rm.stop)
+        self.addCleanup(self.patcher_ar.stop)
+        self.addCleanup(self.patcher_logging.stop)
+        self.addCleanup(self.patcher_monitoring.stop)
+        self.addCleanup(self.patcher_scheduler.stop)
+        self.addCleanup(self.patcher_auth.stop)
+        self.addCleanup(self.patcher_sa_creds.stop)
 
-        mock_default_auth.return_value = (MagicMock(), "test-project-id")
-
+        # Now it's safe to instantiate the client
         self.project_id = "test-project"
         self.region = "us-central1"
         self.gcp_client = GCPRemoteClient(project_id=self.project_id, region=self.region)
+
+        self.gcp_client.FUNCTION_CREATE_ATTEMPTS = 2
+        self.gcp_client.DELAY_TIME = 0
 
     @patch("time.sleep")
     @patch("random.uniform")
@@ -1856,14 +1864,64 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
     """Integration-style tests for complete workflows"""
 
     @patch("google.auth.default")
-    def setUp(self, mock_default_auth):
-        # Setup similar to main test class but with focus on integration scenarios
-        self.setup_mocks()
-        mock_default_auth.return_value = (MagicMock(), "test-project-id")
+    @patch(
+        "caribou.common.models.remote_client.gcp_remote_client.service_account.Credentials.from_service_account_file"
+    )
+    def setUp(self, mock_service_account, mock_default_auth):
+        # Start all the patchers
+        self.patcher_storage = patch("caribou.common.models.remote_client.gcp_remote_client.storage")
+        self.patcher_firestore = patch("caribou.common.models.remote_client.gcp_remote_client.firestore")
+        self.patcher_firestore_admin = patch("caribou.common.models.remote_client.gcp_remote_client.firestore_admin_v1")
+        self.patcher_pubsub = patch("caribou.common.models.remote_client.gcp_remote_client.pubsub_v1")
+        self.patcher_run = patch("caribou.common.models.remote_client.gcp_remote_client.run_v2")
+        self.patcher_iam = patch("caribou.common.models.remote_client.gcp_remote_client.IAMClient")
+        self.patcher_rm = patch("caribou.common.models.remote_client.gcp_remote_client.resourcemanager_v3")
+        self.patcher_ar = patch("caribou.common.models.remote_client.gcp_remote_client.artifactregistry_v1")
+        self.patcher_logging = patch("caribou.common.models.remote_client.gcp_remote_client.logging_v2")
+        self.patcher_monitoring = patch("caribou.common.models.remote_client.gcp_remote_client.monitoring_v3")
+        self.patcher_scheduler = patch("caribou.common.models.remote_client.gcp_remote_client.scheduler_v1")
+        self.patcher_auth = patch(
+            "caribou.common.models.remote_client.gcp_remote_client.google_auth_default",
+            return_value=(MagicMock(), "test-project-id"),
+        )
+        self.patcher_sa_creds = patch("caribou.common.models.remote_client.gcp_remote_client.service_account")
 
+        self.mock_storage = self.patcher_storage.start()
+        self.mock_firestore = self.patcher_firestore.start()
+        self.mock_firestore_admin = self.patcher_firestore_admin.start()
+        self.mock_pubsub = self.patcher_pubsub.start()
+        self.mock_run = self.patcher_run.start()
+        self.mock_iam = self.patcher_iam.start()
+        self.mock_rm = self.patcher_rm.start()
+        self.mock_ar = self.patcher_ar.start()
+        self.mock_logging = self.patcher_logging.start()
+        self.mock_monitoring = self.patcher_monitoring.start()
+        self.mock_scheduler = self.patcher_scheduler.start()
+        self.mock_auth = self.patcher_auth.start()
+        self.mock_sa_creds = self.patcher_sa_creds.start()
+
+        # This ensures that we stop all patchers after the test runs
+        self.addCleanup(self.patcher_storage.stop)
+        self.addCleanup(self.patcher_firestore.stop)
+        self.addCleanup(self.patcher_firestore_admin.stop)
+        self.addCleanup(self.patcher_pubsub.stop)
+        self.addCleanup(self.patcher_run.stop)
+        self.addCleanup(self.patcher_iam.stop)
+        self.addCleanup(self.patcher_rm.stop)
+        self.addCleanup(self.patcher_ar.stop)
+        self.addCleanup(self.patcher_logging.stop)
+        self.addCleanup(self.patcher_monitoring.stop)
+        self.addCleanup(self.patcher_scheduler.stop)
+        self.addCleanup(self.patcher_auth.stop)
+        self.addCleanup(self.patcher_sa_creds.stop)
+
+        # Now it's safe to instantiate the client
         self.project_id = "test-project"
         self.region = "us-central1"
         self.gcp_client = GCPRemoteClient(project_id=self.project_id, region=self.region)
+
+        self.gcp_client.FUNCTION_CREATE_ATTEMPTS = 2
+        self.gcp_client.DELAY_TIME = 0
 
     def setup_mocks(self):
         """Setup all required mocks for integration tests"""
@@ -1938,8 +1996,8 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         # Mock service creation/update flow
         mock_operation = MagicMock()
         mock_operation.result.return_value = None
-        self.mock_run_v2.ServicesClient.return_value.create_service.return_value = mock_operation
-        self.mock_run_v2.ServicesClient.return_value.get_service.return_value = mock_service
+        self.mock_run.ServicesClient.return_value.create_service.return_value = mock_operation
+        self.mock_run.ServicesClient.return_value.get_service.return_value = mock_service
 
         # Execute the function creation
         result = self.gcp_client.create_function(
@@ -1976,7 +2034,7 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         self.gcp_client._store_deployed_image_uri.assert_called_once_with(function_name, expected_image_uri)
 
         # Verify Cloud Run service was created
-        self.mock_run_v2.ServicesClient.return_value.create_service.assert_called_once()
+        self.mock_run.ServicesClient.return_value.create_service.assert_called_once()
 
     def test_sync_workflow_complete_cycle(self):
         """Test complete sync workflow from table creation to predecessor tracking"""
@@ -1992,7 +2050,7 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         # Mock TTL field configuration
         mock_field = MagicMock()
         mock_field.ttl_config = None  # Needs TTL configuration
-        self.mock_firestore_admin_v1.FirestoreAdminClient.return_value.get_field.return_value = mock_field
+        self.mock_firestore_admin.FirestoreAdminClient.return_value.get_field.return_value = mock_field
 
         self.gcp_client.create_sync_tables()
 
@@ -2058,18 +2116,18 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         mock_topic_response = MagicMock()
         mock_topic_response.name = expected_topic_path
 
-        self.mock_pubsub_v1.PublisherClient.return_value.topic_path.return_value = expected_topic_path
-        self.mock_pubsub_v1.PublisherClient.return_value.create_topic.return_value = mock_topic_response
+        self.mock_pubsub.PublisherClient.return_value.topic_path.return_value = expected_topic_path
+        self.mock_pubsub.PublisherClient.return_value.create_topic.return_value = mock_topic_response
 
         # Mock project details for IAM
         mock_project = MagicMock()
         mock_project.name = "projects/123456"
-        self.mock_resourcemanager_v3.ProjectsClient.return_value.get_project.return_value = mock_project
+        self.mock_rm.ProjectsClient.return_value.get_project.return_value = mock_project
 
         # Mock IAM policy
         mock_policy = MagicMock()
         mock_policy.bindings = []
-        self.mock_pubsub_v1.PublisherClient.return_value.get_iam_policy.return_value = mock_policy
+        self.mock_pubsub.PublisherClient.return_value.get_iam_policy.return_value = mock_policy
 
         topic_path = self.gcp_client.create_pubsub_topic(topic_name)
         self.assertEqual(topic_path, expected_topic_path)
@@ -2079,8 +2137,8 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         mock_subscription_response = MagicMock()
         mock_subscription_response.name = expected_subscription_path
 
-        self.mock_pubsub_v1.SubscriberClient.return_value.subscription_path.return_value = expected_subscription_path
-        self.mock_pubsub_v1.SubscriberClient.return_value.create_subscription.return_value = mock_subscription_response
+        self.mock_pubsub.SubscriberClient.return_value.subscription_path.return_value = expected_subscription_path
+        self.mock_pubsub.SubscriberClient.return_value.create_subscription.return_value = mock_subscription_response
 
         # Mock dead letter topic creation
         self.gcp_client.create_pubsub_topic = MagicMock(return_value=f"{expected_topic_path}-dl")
@@ -2094,13 +2152,13 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         test_message = "integration test message"
         mock_future = MagicMock()
         mock_future.result.return_value = "message-id-123"
-        self.mock_pubsub_v1.PublisherClient.return_value.publish.return_value = mock_future
+        self.mock_pubsub.PublisherClient.return_value.publish.return_value = mock_future
 
         with patch("builtins.print"):  # Mock print statements
             self.gcp_client.send_message_to_messaging_service(topic_path, test_message)
 
         # Verify message was published
-        self.mock_pubsub_v1.PublisherClient.return_value.publish.assert_called_with(
+        self.mock_pubsub.PublisherClient.return_value.publish.assert_called_with(
             topic=topic_path, data=test_message.encode("utf-8")
         )
 
@@ -2110,27 +2168,77 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         # Mock existing policy without invoker permission
         mock_run_policy = MagicMock()
         mock_run_policy.bindings = []
-        self.mock_run_v2.ServicesClient.return_value.service_path.return_value = "service-path"
-        self.mock_run_v2.ServicesClient.return_value.get_iam_policy.return_value = mock_run_policy
+        self.mock_run.ServicesClient.return_value.service_path.return_value = "service-path"
+        self.mock_run.ServicesClient.return_value.get_iam_policy.return_value = mock_run_policy
 
         self.gcp_client.add_pubsub_permission_for_cloud_run(cloud_run_service_name, service_account_name)
 
         # Verify IAM policy was updated
-        self.mock_run_v2.ServicesClient.return_value.set_iam_policy.assert_called_once()
+        self.mock_run.ServicesClient.return_value.set_iam_policy.assert_called_once()
 
 
 class TestGCPRemoteClientPerformance(unittest.TestCase):
     """Performance and resource optimization tests"""
 
     @patch("google.auth.default")
-    def setUp(self, mock_default_auth):
-        # Setup similar to main test class
-        self.setup_mocks()
-        mock_default_auth.return_value = (MagicMock(), "test-project-id")
+    @patch(
+        "caribou.common.models.remote_client.gcp_remote_client.service_account.Credentials.from_service_account_file"
+    )
+    def setUp(self, mock_service_account, mock_default_auth):
+        # Start all the patchers
+        self.patcher_storage = patch("caribou.common.models.remote_client.gcp_remote_client.storage")
+        self.patcher_firestore = patch("caribou.common.models.remote_client.gcp_remote_client.firestore")
+        self.patcher_firestore_admin = patch("caribou.common.models.remote_client.gcp_remote_client.firestore_admin_v1")
+        self.patcher_pubsub = patch("caribou.common.models.remote_client.gcp_remote_client.pubsub_v1")
+        self.patcher_run = patch("caribou.common.models.remote_client.gcp_remote_client.run_v2")
+        self.patcher_iam = patch("caribou.common.models.remote_client.gcp_remote_client.IAMClient")
+        self.patcher_rm = patch("caribou.common.models.remote_client.gcp_remote_client.resourcemanager_v3")
+        self.patcher_ar = patch("caribou.common.models.remote_client.gcp_remote_client.artifactregistry_v1")
+        self.patcher_logging = patch("caribou.common.models.remote_client.gcp_remote_client.logging_v2")
+        self.patcher_monitoring = patch("caribou.common.models.remote_client.gcp_remote_client.monitoring_v3")
+        self.patcher_scheduler = patch("caribou.common.models.remote_client.gcp_remote_client.scheduler_v1")
+        self.patcher_auth = patch(
+            "caribou.common.models.remote_client.gcp_remote_client.google_auth_default",
+            return_value=(MagicMock(), "test-project-id"),
+        )
+        self.patcher_sa_creds = patch("caribou.common.models.remote_client.gcp_remote_client.service_account")
 
+        self.mock_storage = self.patcher_storage.start()
+        self.mock_firestore = self.patcher_firestore.start()
+        self.mock_firestore_admin = self.patcher_firestore_admin.start()
+        self.mock_pubsub = self.patcher_pubsub.start()
+        self.mock_run = self.patcher_run.start()
+        self.mock_iam = self.patcher_iam.start()
+        self.mock_rm = self.patcher_rm.start()
+        self.mock_ar = self.patcher_ar.start()
+        self.mock_logging = self.patcher_logging.start()
+        self.mock_monitoring = self.patcher_monitoring.start()
+        self.mock_scheduler = self.patcher_scheduler.start()
+        self.mock_auth = self.patcher_auth.start()
+        self.mock_sa_creds = self.patcher_sa_creds.start()
+
+        # This ensures that we stop all patchers after the test runs
+        self.addCleanup(self.patcher_storage.stop)
+        self.addCleanup(self.patcher_firestore.stop)
+        self.addCleanup(self.patcher_firestore_admin.stop)
+        self.addCleanup(self.patcher_pubsub.stop)
+        self.addCleanup(self.patcher_run.stop)
+        self.addCleanup(self.patcher_iam.stop)
+        self.addCleanup(self.patcher_rm.stop)
+        self.addCleanup(self.patcher_ar.stop)
+        self.addCleanup(self.patcher_logging.stop)
+        self.addCleanup(self.patcher_monitoring.stop)
+        self.addCleanup(self.patcher_scheduler.stop)
+        self.addCleanup(self.patcher_auth.stop)
+        self.addCleanup(self.patcher_sa_creds.stop)
+
+        # Now it's safe to instantiate the client
         self.project_id = "test-project"
         self.region = "us-central1"
         self.gcp_client = GCPRemoteClient(project_id=self.project_id, region=self.region)
+
+        self.gcp_client.FUNCTION_CREATE_ATTEMPTS = 2
+        self.gcp_client.DELAY_TIME = 0
 
     def setup_mocks(self):
         """Setup required mocks"""
@@ -2146,14 +2254,14 @@ class TestGCPRemoteClientPerformance(unittest.TestCase):
     def test_batch_operations_performance(self):
         """Test batch settings for Pub/Sub operations"""
         # Verify batch settings are configured for performance
-        self.mock_pubsub_v1.types.BatchSettings.assert_called_with(
+        self.mock_pubsub.types.BatchSettings.assert_called_with(
             max_messages=1, max_bytes=10000000, max_latency=0.01  # 10 MB  # 10ms
         )
 
         # Test that publisher client uses these settings
-        self.mock_pubsub_v1.PublisherClient.assert_called_with(
+        self.mock_pubsub.PublisherClient.assert_called_with(
             credentials=self.gcp_client._credentials,
-            batch_settings=self.mock_pubsub_v1.types.BatchSettings.return_value,
+            batch_settings=self.mock_pubsub.types.BatchSettings.return_value,
         )
 
     def test_firestore_transaction_optimization(self):
@@ -2210,7 +2318,7 @@ class TestGCPRemoteClientPerformance(unittest.TestCase):
         mock_count_series = MagicMock()
         mock_count_series.points = [mock_count_point]
 
-        self.mock_monitoring_v3.MetricServiceClient.return_value.list_time_series.side_effect = [
+        self.mock_monitoring.MetricServiceClient.return_value.list_time_series.side_effect = [
             [mock_series],
             [mock_count_series],
         ]
@@ -2221,7 +2329,7 @@ class TestGCPRemoteClientPerformance(unittest.TestCase):
         self.assertEqual(result, 0.25)  # 0.75 / 3
 
         # Verify proper aggregation was used
-        calls = self.mock_monitoring_v3.MetricServiceClient.return_value.list_time_series.call_args_list
+        calls = self.mock_monitoring.MetricServiceClient.return_value.list_time_series.call_args_list
         self.assertEqual(len(calls), 2)  # One for metric, one for instance count
 
     def test_image_cache_efficiency(self):

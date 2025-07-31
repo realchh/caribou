@@ -20,6 +20,7 @@ from caribou.common.constants import (
     HOME_REGION_THRESHOLD,
     LOG_VERSION,
     MAX_GCP_TRANSFER_SIZE,
+    MAX_GCP_WORKERS,
     MAX_TRANSFER_SIZE,
     MAX_WORKERS,
     MAXIMUM_HOPS_FROM_CLIENT_REQUEST,
@@ -120,8 +121,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self._thread_local: threading.local = threading.local()
 
         # For thread pool -> Invoke successor functions asynchronously
-        self._thread_pool: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-        self._futures: list[Future] = []
+        # self._thread_pool: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        # self._futures: list[Future] = []
 
         # For logging
         ## This will be overritten by the first function that is called
@@ -131,13 +132,54 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # For redirecting the function to the home region
         self._home_region_threshold: float = HOME_REGION_THRESHOLD  # fractional % of the time run in home region
 
+        # Cache for max number of worker thread
+        self._max_concurrent_ops_cache: dict[str, int] = {}
+
         # Track the number of hops from client request
         # To forcefully terminate the workflow if it exceeds a certain number
         ## This will be overritten by input function arguments
         # self._number_of_hops_from_client_request: int = 0
 
         # Cache the remote clients (one per provider-region pair)
-        self._remote_clients: dict[str, RemoteClient] = {}
+        # self._remote_clients: dict[str, RemoteClient] = {}
+
+    def _get_provider_optimal_thread_count(
+        self, current_instance_name: str, workflow_placement_decision: dict[str, Any]
+    ) -> int:
+        """
+        Calculate optimal thread count based on the deployment provider.
+        """
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+
+        if provider == Provider.AWS.value:
+            return MAX_WORKERS
+
+        if provider == Provider.GCP.value:
+            return self._get_max_gcp_concurrent_operations(current_instance_name, workflow_placement_decision)
+
+        # Default fallback (could add Azure, testing purposes, etc.)
+        return MAX_WORKERS
+
+    def _get_max_gcp_concurrent_operations(
+        self, current_instance_name: str, workflow_placement_decision: dict[str, Any]
+    ) -> int:
+        """
+        Thread-safe cache implementation for concurrent operations calculation.
+        """
+        cache_key = f"{workflow_placement_decision['run_id']}-{current_instance_name}"
+
+        if cache_key in self._max_concurrent_ops_cache:
+            return self._max_concurrent_ops_cache[cache_key]
+
+        # Max number of worker threads = number of instances that are being called
+        instance_info = workflow_placement_decision.get("instances", {}).get(current_instance_name, {})
+        succeeding_instances = instance_info.get("succeeding_instances", [])
+        max_concurrent = max(1, min(len(succeeding_instances), MAX_GCP_WORKERS))
+
+        # Multiple threads might compute and store the same value - that's OK
+        self._max_concurrent_ops_cache[cache_key] = max_concurrent
+
+        return max_concurrent
 
     def _ensure_endpoint(self) -> Endpoints:
         if self._endpoint is None:
@@ -193,6 +235,12 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         successor_instance_name, successor_workflow_placement_decision_dictionary = self.get_successor_instance_name(
             function, workflow_placement_decision
         )
+
+        if not hasattr(self._thread_local, "request_futures"):
+            self._thread_local.request_futures = []
+            self._thread_local.thread_pool = ThreadPoolExecutor(
+                max_workers=self._get_provider_optimal_thread_count(current_instance_name, workflow_placement_decision)
+            )
 
         def invoke_worker(
             invocation_start_time: datetime,
@@ -358,8 +406,10 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # Start the invocation timer AFTER the successor instance name has been determined
         # As they will also be in the critical path
         invocation_start_time = datetime.now(GLOBAL_TIME_ZONE)
-        if self._thread_pool is not None and isinstance(self._thread_pool, ThreadPoolExecutor):
-            future: Future = self._thread_pool.submit(
+        if self._thread_local.request_futures is not None and isinstance(
+            self._thread_local.thread_pool, ThreadPoolExecutor
+        ):
+            future: Future = self._thread_local.thread_pool.submit(
                 invoke_worker,
                 invocation_start_time,
                 json_payload,
@@ -367,7 +417,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 transmission_taint,
                 conditional,
             )
-            self._futures.append(future)
+            self._thread_local.request_futures.append(future)
         else:
             # Run the worker in the main thread
             invoke_worker(
@@ -890,6 +940,20 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 payload = caribou_wrapper_argument.get("payload", {})
                 result: Any = None
                 self._run_id_to_successor_index[workflow_placement_decision["run_id"]] = 0
+
+                current_instance_name = workflow_placement_decision["current_instance_name"]
+
+                optimal_thread_count = self._get_provider_optimal_thread_count(
+                    current_instance_name, workflow_placement_decision
+                )
+
+                if not hasattr(self._thread_local, "request_futures"):
+                    self._thread_local.request_futures = []
+                if not hasattr(self._thread_local, "thread_pool"):
+                    self._thread_local.thread_pool = ThreadPoolExecutor(max_workers=optimal_thread_count)
+
+                initial_futures_count = len(self._thread_local.request_futures)
+
                 try:
                     # Call the function with the payload and the caribou metadata
                     result = func(payload)
@@ -897,9 +961,18 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                     user_code_end_time = datetime.now(GLOBAL_TIME_ZONE)
 
                     # Wait until all the futures (Invoke serverless functions) are done
-                    for future in self._futures:
+                    current_futures = self._thread_local.request_futures[initial_futures_count:]
+
+                    for future in current_futures:
                         future.result()
-                    self._futures = []
+
+                    if initial_futures_count == 0:
+                        self._thread_local.thread_pool.shutdown(wait=True)
+                        # Clear the thread-local data for next request
+                        if hasattr(self._thread_local, "request_futures"):
+                            del self._thread_local.request_futures
+                        if hasattr(self._thread_local, "thread_pool"):
+                            del self._thread_local.thread_pool
 
                     end_time = datetime.now(GLOBAL_TIME_ZONE)
 
@@ -925,6 +998,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                         log_message,
                         workflow_placement_decision["run_id"],
                     )
+
+                    if initial_futures_count == 0:
+                        if hasattr(self._thread_local, "thread_pool"):
+                            self._thread_local.thread_pool.shutdown(wait=False)
+                        # Clear the thread-local data
+                        if hasattr(self._thread_local, "request_futures"):
+                            del self._thread_local.request_futures
+                        if hasattr(self._thread_local, "thread_pool"):
+                            del self._thread_local.thread_pool
 
                     # Raise the error now
                     # To terminate the lambda function
@@ -1447,13 +1529,16 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         return cpu_model
 
     def _get_remote_client(self, provider: str, region: str) -> RemoteClient:
+        if not hasattr(self._thread_local, "remote_clients"):
+            self._thread_local.remote_clients = {}
+
         # Check if it is already in the cache
         key = f"{provider}-{region}"
-        if key in self._remote_clients:
-            return self._remote_clients[key]
+        if key in self._thread_local.remote_clients:
+            return self._thread_local.remote_clients[key]
 
         # Create a new remote client
         remote_client = RemoteClientFactory.get_remote_client(provider, region)
-        self._remote_clients[key] = remote_client
+        self._thread_local.remote_clients[key] = remote_client
 
         return remote_client

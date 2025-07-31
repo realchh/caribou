@@ -234,7 +234,6 @@ def consolidate(event: dict[str, Any]) -> dict[str, Any]:
             for attempt in range(max_retries):
                 try:
                     blob.download_to_filename(os.path.join(tmp_dir, "recognition_results.json"))
-                    print(f"Downloaded recognition results {recognition_filepath} from GCS, attempt {attempt + 1} of {max_retries}")
                 except google.api_core.exceptions.NotFound:
                     print(f"attempt {attempt + 1}/{max_retries}: Object {recognition_filepath} not found, retrying in {retry_delay} seconds...")
                     if attempt < max_retries - 1:
