@@ -123,10 +123,13 @@ class TestRemoteCLIHandler(unittest.TestCase):
         self.event["action"] = "manage_deployments"
         self.event["deployment_metrics_calculator_type"] = "invalid_type"
         response = caribou_cli(self.event, self.context)
-        self.assertEqual(response, {
-            "status": 400,
-            "message": "Invalid deployment_metrics_calculator_type specified. Allowed values are 'simple', 'go'"
-        })
+        self.assertEqual(
+            response,
+            {
+                "status": 400,
+                "message": "Invalid deployment_metrics_calculator_type specified. Allowed values are 'simple', 'go'",
+            },
+        )
 
     # Test handle_manage_deployments with GCP provider and go calculator
     @patch.dict(os.environ, {"CARIBOU_DEFAULT_PROVIDER": "gcp"})
@@ -134,10 +137,9 @@ class TestRemoteCLIHandler(unittest.TestCase):
         self.event["action"] = "manage_deployments"
         self.event["deployment_metrics_calculator_type"] = "go"
         response = caribou_cli(self.event, self.context)
-        self.assertEqual(response, {
-            "status": 400,
-            "message": "Go deployment metrics calculator is not supported for GCP provider"
-        })
+        self.assertEqual(
+            response, {"status": 400, "message": "Go deployment metrics calculator is not supported for GCP provider"}
+        )
 
     # Test handle_manage_deployments with go calculator (valid case)
     def test_handle_manage_deployments_with_go_calculator(self):
@@ -162,10 +164,13 @@ class TestRemoteCLIHandler(unittest.TestCase):
         self.event["action"] = "data_collect"
         self.event["collector"] = "invalid_collector"
         response = caribou_cli(self.event, self.context)
-        self.assertEqual(response, {
-            "status": 400,
-            "message": "Invalid collector specified, Allowed values are provider, carbon, performance, workflow, all"
-        })
+        self.assertEqual(
+            response,
+            {
+                "status": 400,
+                "message": "Invalid collector specified, Allowed values are provider, carbon, performance, workflow, all",
+            },
+        )
 
     # Test handle_data_collect with carbon collector
     def test_handle_data_collect_carbon_collector(self):
@@ -175,11 +180,9 @@ class TestRemoteCLIHandler(unittest.TestCase):
             mock_instance = MockCollector.return_value
             response = caribou_cli(self.event, self.context)
             mock_instance.run.assert_called_once()
-            self.assertEqual(response, {
-                "status": 200,
-                "scheduled_collector": "carbon",
-                "workflow_id": "test_workflow_id"
-            })
+            self.assertEqual(
+                response, {"status": 200, "scheduled_collector": "carbon", "workflow_id": "test_workflow_id"}
+            )
 
     # Test handle_data_collect with performance collector
     def test_handle_data_collect_performance_collector(self):
@@ -189,11 +192,9 @@ class TestRemoteCLIHandler(unittest.TestCase):
             mock_instance = MockCollector.return_value
             response = caribou_cli(self.event, self.context)
             mock_instance.run.assert_called_once()
-            self.assertEqual(response, {
-                "status": 200,
-                "scheduled_collector": "performance",
-                "workflow_id": "test_workflow_id"
-            })
+            self.assertEqual(
+                response, {"status": 200, "scheduled_collector": "performance", "workflow_id": "test_workflow_id"}
+            )
 
     # Test handle_data_collect with workflow collector
     def test_handle_data_collect_workflow_collector(self):
@@ -203,11 +204,9 @@ class TestRemoteCLIHandler(unittest.TestCase):
             mock_instance = MockCollector.return_value
             response = caribou_cli(self.event, self.context)
             mock_instance.run_on_workflow.assert_called_once_with("test_workflow_id")
-            self.assertEqual(response, {
-                "status": 200,
-                "scheduled_collector": "workflow",
-                "workflow_id": "test_workflow_id"
-            })
+            self.assertEqual(
+                response, {"status": 200, "scheduled_collector": "workflow", "workflow_id": "test_workflow_id"}
+            )
 
     # Test handle_data_collect with workflow collector but missing workflow_id
     def test_handle_data_collect_workflow_collector_missing_workflow_id(self):
@@ -215,19 +214,19 @@ class TestRemoteCLIHandler(unittest.TestCase):
         self.event["collector"] = "workflow"
         self.event.pop("workflow_id")
         response = caribou_cli(self.event, self.context)
-        self.assertEqual(response, {
-            "status": 400,
-            "message": "Workflow_id must be provided for the workflow collector."
-        })
+        self.assertEqual(
+            response, {"status": 400, "message": "Workflow_id must be provided for the workflow collector."}
+        )
 
     # Test handle_data_collect with "all" collector
     def test_handle_data_collect_all_collectors(self):
         self.event["action"] = "data_collect"
         self.event["collector"] = "all"
-        with patch("caribou.deployment.client.remote_cli.remote_cli_handler.ProviderCollector") as MockProvider, \
-                patch("caribou.deployment.client.remote_cli.remote_cli_handler.CarbonCollector") as MockCarbon, \
-                patch(
-                    "caribou.deployment.client.remote_cli.remote_cli_handler.PerformanceCollector") as MockPerformance:
+        with patch("caribou.deployment.client.remote_cli.remote_cli_handler.ProviderCollector") as MockProvider, patch(
+            "caribou.deployment.client.remote_cli.remote_cli_handler.CarbonCollector"
+        ) as MockCarbon, patch(
+            "caribou.deployment.client.remote_cli.remote_cli_handler.PerformanceCollector"
+        ) as MockPerformance:
             mock_provider = MockProvider.return_value
             mock_carbon = MockCarbon.return_value
             mock_performance = MockPerformance.return_value
@@ -238,11 +237,7 @@ class TestRemoteCLIHandler(unittest.TestCase):
             mock_carbon.run.assert_called_once()
             mock_performance.run.assert_called_once()
 
-            self.assertEqual(response, {
-                "status": 200,
-                "scheduled_collector": "all",
-                "workflow_id": "test_workflow_id"
-            })
+            self.assertEqual(response, {"status": 200, "scheduled_collector": "all", "workflow_id": "test_workflow_id"})
 
     # Test handle_run with argument
     def test_handle_run_with_argument(self):
@@ -303,9 +298,7 @@ class TestRemoteCLIHandler(unittest.TestCase):
             mock_instance = MockManager.return_value
             response = caribou_cli(self.event, self.context)
             MockManager.assert_called_once_with("simple", deployed_remotely=True)
-            mock_instance.run_deployment_algorithm.assert_called_once_with(
-                "test_workflow_id", ["1", "2"], 10
-            )
+            mock_instance.run_deployment_algorithm.assert_called_once_with("test_workflow_id", ["1", "2"], 10)
             self.assertEqual(response, {"status": 200, "message": "Deployment algorithm performed on test_workflow_id"})
 
     # Test internal action - run_deployment_algorithm missing parameters
@@ -349,13 +342,13 @@ class TestRemoteCLIHandler(unittest.TestCase):
     @patch.dict(os.environ, {"K_SERVICE": "test_service"})
     def test_gcp_request_handling_flask(self):
         import flask
+
         mock_flask_request = MagicMock(spec=flask.Request)
         mock_flask_request.get_json.return_value = {"action": "version"}
 
         response = caribou_cli(mock_flask_request, self.context)
         mock_flask_request.get_json.assert_called_once()
         self.assertEqual(response, {"status": 200, "version": CARIBOU_VERSION})
-
 
     # Test GCP request handling with invalid request format
     @patch.dict(os.environ, {"K_SERVICE": "test_service"})
@@ -382,6 +375,7 @@ class TestRemoteCLIHandler(unittest.TestCase):
         self.event["event"] = None
         with self.assertRaises(AttributeError):
             caribou_cli(self.event, self.context)
+
 
 if __name__ == "__main__":
     unittest.main()
