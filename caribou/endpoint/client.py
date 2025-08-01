@@ -272,17 +272,14 @@ class Client:
         deployed_region: dict[str, dict[str, Any]] = json.loads(deployed_region_json)
 
         gcp_regions: set[str] = set()
-        aws_regions: set[str] = set()
 
         for function_physical_instance, provider_region in deployed_region.items():
             deploy_region: dict[str, str] = provider_region["deploy_region"]
             print(f"removing function {function_physical_instance} from {deploy_region}")
             self._remove_function_instance(function_physical_instance, provider_region["deploy_region"])
 
-            if deployed_region.get("provider") == Provider.GCP.value:
+            if deploy_region.get("provider") == Provider.GCP.value:
                 gcp_regions.add(deploy_region["region"])
-            elif deployed_region.get("provider") == Provider.AWS.value:
-                aws_regions.add(deploy_region["region"])
 
         if gcp_regions:
             gcp_region = next(iter(gcp_regions))
