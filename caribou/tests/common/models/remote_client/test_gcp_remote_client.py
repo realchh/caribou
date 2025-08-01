@@ -633,32 +633,61 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
             return wrapper
 
         with patch("caribou.common.models.remote_client.gcp_remote_client.firestore.transactional", mock_transactional):
-            with patch("time.sleep"):
-                result = self.gcp_client.set_predecessor_reached(
-                    predecessor_name, sync_node_name, workflow_instance_id, direct_call
-                )
+            with patch("time.sleep"):  # Patch sleep to speed up the test
+                # Assert that a RuntimeError is raised after all retries fail
+                with self.assertRaises(RuntimeError):
+                    self.gcp_client.set_predecessor_reached(
+                        predecessor_name, sync_node_name, workflow_instance_id, direct_call
+                    )
 
-        # Should return empty state after max retries
-        self.assertEqual(result, ([], 0.0, 0.0))
-
-    def test_upload_predecessor_data_retry_logic(self):
-        """Test retry logic in upload_predecessor_data_at_sync_node"""
+    def test_upload_predecessor_data_creates_document_if_not_exists(self):
+        """Test that a new document is created if it doesn't exist."""
         function_name = "test-function"
         workflow_instance_id = "workflow1"
         message = "test-message"
 
-        mock_document = MagicMock()
-        # First call raises NotFound, second call succeeds with set()
-        mock_document.update.side_effect = [google_api_exceptions.NotFound("Document not found"), None]
+        # Mock the client and document reference
+        mock_document_ref = MagicMock()
+        self.gcp_client._firestore_client.collection.return_value.document.return_value = mock_document_ref
 
-        self.gcp_client._firestore_client.collection.return_value.document.return_value = mock_document
+        # 1. Mock the snapshot returned by doc_ref.get()
+        # The snapshot should not exist initially.
+        mock_snapshot = MagicMock()
+        mock_snapshot.exists = False
 
-        result = self.gcp_client.upload_predecessor_data_at_sync_node(function_name, workflow_instance_id, message)
+        # 2. Mock the transaction object that will be passed to the decorated function
+        mock_tx = MagicMock()
 
+        # 3. This is the key: we mock the transactional decorator.
+        #    Our mock will call the decorated function (_transactional_update)
+        #    with our mocked transaction and document reference.
+        def mock_transactional_decorator(func):
+            def wrapper(tx, doc_ref, *args, **kwargs):
+                # Inside the transaction, simulate the get() call
+                doc_ref.get.return_value = mock_snapshot
+                # Now, execute the real logic of the user's function
+                return func(tx, doc_ref, *args, **kwargs)
+
+            return wrapper
+
+        # Patch the transactional decorator and the transaction object itself
+        with patch(
+            "caribou.common.models.remote_client.gcp_remote_client.firestore.transactional",
+            mock_transactional_decorator,
+        ):
+            self.gcp_client._firestore_client.transaction.return_value = mock_tx
+
+            # Run the function
+            result = self.gcp_client.upload_predecessor_data_at_sync_node(function_name, workflow_instance_id, message)
+
+        # Assert the function returns the success code
         self.assertEqual(result, 1.0)
-        # Verify both update and set were called
-        self.assertEqual(mock_document.update.call_count, 1)
-        self.assertEqual(mock_document.set.call_count, 1)
+
+        # Verify that tx.set() was called because the document didn't exist
+        mock_tx.set.assert_called_once()
+
+        # Verify that tx.update() was NOT called
+        mock_tx.update.assert_not_called()
 
     # =====================================
     # DOCKER & IMAGE MANAGEMENT TESTS

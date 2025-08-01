@@ -213,6 +213,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     def cloud_run_service_exists(self, resource: Resource) -> bool:
         return self.get_cloud_run_service(resource.name) is not None
 
+    # pylint: disable=too-many-statements
     def set_predecessor_reached(
         self, predecessor_name: str, sync_node_name: str, workflow_instance_id: str, direct_call: bool
     ) -> tuple[list[bool], float, float]:
@@ -220,8 +221,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         document = client.collection(SYNC_PREDECESSOR_COUNTER_TABLE).document(workflow_instance_id)
 
         # Add retry logic with exponential backoff
-        max_retries = 5
+        max_retries = 15
         base_delay = 0.1
+        max_delay = 5.0
 
         for attempt in range(max_retries):
             try:
@@ -270,13 +272,17 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             except google_api_exceptions.Aborted as e:
                 # Transaction was aborted due to contention, retry with backoff
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
-                    logger.warning("Transaction aborted on attempt %s, retrying in %.2fs: %s", attempt + 1, delay, e)
-                    time.sleep(delay)
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    jitter = random.uniform(0, delay * 0.1)
+                    total_delay = delay + jitter
+                    logger.warning(
+                        "Transaction aborted on attempt %s, retrying in %.2fs: %s", attempt + 1, total_delay, e
+                    )
+                    time.sleep(total_delay)
                     continue
 
                 logger.error("Transaction failed after %d attempts due to contention: %s", max_retries, e)
-                return [], 0.0, 0.0
+                raise RuntimeError(f"Failed to set predecessor reached after {max_retries} attempts: {e}") from e
 
             except google_api_exceptions.GoogleAPICallError as e:
                 logger.error(
@@ -287,10 +293,21 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     time.sleep(delay)
                     continue
 
-                return [], 0.0, 0.0
+                raise RuntimeError(f"Failed to set predecessor reached after {max_retries} attempts: {e}") from e
+
+            except ValueError as e:
+                logger.error(
+                    "Firestore transaction failed for sync node %s on attempt %d: %s", sync_node_name, attempt + 1, e
+                )
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
+                    time.sleep(delay)
+                    continue
+
+                raise RuntimeError(f"Failed to set predecessor reached after {max_retries} attempts: {e}") from e
 
         # Should never reach here, but return empty state if all retries failed
-        return [], 0.0, 0.0
+        raise RuntimeError(f"Failed to set predecessor reached after {max_retries} attempts: Unknown error")
 
     def create_sync_tables(self) -> None:
         # Check if table exists
@@ -348,56 +365,64 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self, function_name: str, workflow_instance_id: str, message: str
     ) -> float:
         client = self._firestore_client
-        document = client.collection(SYNC_MESSAGES_TABLE).document(f"{function_name}:{workflow_instance_id}")
-
-        ttl_time = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
+        document = client.collection(SYNC_MESSAGES_TABLE).document(f"{workflow_instance_id}:{function_name}")
 
         # ArrayUnion is atomic, so no transaction needed - this reduces contention significantly
-        max_retries = 3
+        max_retries = 15
         base_delay = 0.1
+        max_delay = 5.0
 
         for attempt in range(max_retries):
             try:
-                document.update(
-                    {
-                        "message": firestore.ArrayUnion([message]),
-                        FIRESTORE_TTL_FIELD_NAME: ttl_time,
-                    }
-                )
+                transaction = client.transaction()
+
+                @firestore.transactional
+                def _transactional_update(tx: firestore.Transaction, doc_ref: DocumentReference) -> None:
+                    snap = doc_ref.get(transaction=tx)
+
+                    if snap.exists:
+                        # Document exists, just update the message array
+                        tx.update(doc_ref, {"message": firestore.ArrayUnion([message])})
+                    else:
+                        ttl_time = datetime.now(UTC) + timedelta(seconds=SYNC_TABLE_TTL)
+
+                        # Document does not exist, create it with the message and TTL
+                        tx.set(
+                            doc_ref,
+                            {
+                                "message": [message],
+                                FIRESTORE_TTL_FIELD_NAME: ttl_time,
+                            },
+                        )
+
+                _transactional_update(transaction, document)
+
                 return 1.0
-
-            except google_api_exceptions.NotFound:
-                # Document doesn't exist, create it with set()
-                try:
-                    document.set(
-                        {
-                            "message": [message],
-                            FIRESTORE_TTL_FIELD_NAME: ttl_time,
-                        }
-                    )
-                    return 1.0
-
-                except google_api_exceptions.GoogleAPICallError as e:
-                    logger.warning("Failed to create document on attempt %d: %s", attempt + 1, e)
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
-                        time.sleep(delay)
-                        continue
-
-                    return 0.0
 
             except google_api_exceptions.GoogleAPICallError as e:
                 logger.error(
                     "Firestore update failed for sync node %s on attempt %d: %s", function_name, attempt + 1, e
                 )
                 if attempt < max_retries - 1:
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    jitter = random.uniform(0, delay * 0.1)
+                    time.sleep(delay + jitter)
+                    continue
+
+                raise RuntimeError(f"Failed to upload predecessor data after {max_retries} attempts: {e}") from e
+
+            except ValueError as e:
+                logger.error(
+                    "Firestore transaction failed for sync node %s on attempt %d: %s", function_name, attempt + 1, e
+                )
+                if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
                     time.sleep(delay)
                     continue
 
-                return 0.0
+                raise RuntimeError(f"Failed to set predecessor reached after {max_retries} attempts: {e}") from e
 
-        return 0.0
+        raise RuntimeError("Failed to upload predecessor data: unknown error")
 
     def get_predecessor_data(
         self,
@@ -406,7 +431,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         consistent_read: bool = True,  # pylint: disable=unused-argument
     ) -> tuple[list[str], float]:
         client = self._firestore_client
-        document_id = f"{current_instance_name}:{workflow_instance_id}"
+        document_id = f"{workflow_instance_id}:{current_instance_name}"
         snap = client.collection(SYNC_MESSAGES_TABLE).document(document_id).get()
 
         if not snap.exists:
