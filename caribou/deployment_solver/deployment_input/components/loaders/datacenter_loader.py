@@ -26,6 +26,7 @@ from caribou.common.constants import (
     SOLVER_INPUT_TRANSMISSION_COST_DEFAULT,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
+from caribou.common.provider import Provider
 from caribou.deployment_solver.deployment_input.components.loader import InputLoader
 
 
@@ -55,7 +56,8 @@ class DatacenterLoader(InputLoader):
         )
 
     def get_pue(self, region_name: str) -> float:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_pue = SOLVER_INPUT_GCP_PUE_DEFAULT
         else:
             default_pue = SOLVER_INPUT_PUE_DEFAULT
@@ -66,7 +68,8 @@ class DatacenterLoader(InputLoader):
         return self._datacenter_data.get(region_name, {}).get("cfe", SOLVER_INPUT_CFE_DEFAULT)
 
     def get_max_cpu_power(self, region_name: str) -> float:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_max_cpu_power = SOLVER_INPUT_GCP_MAX_CPU_POWER_DEFAULT
         else:
             default_max_cpu_power = SOLVER_INPUT_MAX_CPU_POWER_DEFAULT
@@ -74,7 +77,8 @@ class DatacenterLoader(InputLoader):
         return self._datacenter_data.get(region_name, {}).get("max_cpu_power_kWh", default_max_cpu_power)
 
     def get_min_cpu_power(self, region_name: str) -> float:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_min_cpu_power = SOLVER_INPUT_GCP_MIN_CPU_POWER_DEFAULT
         else:
             default_min_cpu_power = SOLVER_INPUT_MIN_CPU_POWER_DEFAULT
@@ -82,7 +86,8 @@ class DatacenterLoader(InputLoader):
         return self._datacenter_data.get(region_name, {}).get("min_cpu_power_kWh", default_min_cpu_power)
 
     def get_sns_request_cost(self, region_name: str) -> float:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_sns_cost = SOLVER_INPUT_GCP_PUBSUB_REQUEST_COST_DEFAULT
         else:
             default_sns_cost = SOLVER_INPUT_SNS_REQUEST_COST_DEFAULT
@@ -90,7 +95,8 @@ class DatacenterLoader(InputLoader):
         return self._datacenter_data.get(region_name, {}).get("sns_cost", {}).get("sns_cost", default_sns_cost)
 
     def get_dynamodb_read_write_cost(self, region_name: str) -> tuple[float, float]:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_read_cost = SOLVER_INPUT_GCP_FIRESTORE_READ_COST_DEFAULT
             default_write_cost = SOLVER_INPUT_GCP_FIRESTORE_WRITE_COST_DEFAULT
         else:
@@ -101,7 +107,8 @@ class DatacenterLoader(InputLoader):
         return dynamodb_costs.get("read_cost", default_read_cost), dynamodb_costs.get("write_cost", default_write_cost)
 
     def get_ecr_storage_cost(self, region_name: str) -> float:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_ecr_cost = SOLVER_INPUT_GCP_ARTIFACT_REGISTRY_MONTHLY_STORAGE_COST_DEFAULT
         else:
             default_ecr_cost = SOLVER_INPUT_ECR_MONTHLY_STORAGE_COST_DEFAULT
@@ -117,7 +124,8 @@ class DatacenterLoader(InputLoader):
         )
 
     def get_invocation_cost(self, region_name: str, architecture: str) -> float:
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             return (
                 self._datacenter_data.get(region_name, {})
                 .get("execution_cost", {})
@@ -135,7 +143,8 @@ class DatacenterLoader(InputLoader):
     def get_transmission_cost(self, region_name: str, intra_provider_transfer: bool) -> float:
         transfer_type = "provider_data_transfer" if intra_provider_transfer else "global_data_transfer"
 
-        if len(region_name.split("-")) == 2:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
             default_transmission_cost = SOLVER_INPUT_GCP_TRANSMISSION_COST_DEFAULT
         else:
             default_transmission_cost = SOLVER_INPUT_TRANSMISSION_COST_DEFAULT

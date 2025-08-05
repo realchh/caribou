@@ -109,7 +109,15 @@ class WorkflowBuilder:
         functions_to_visit: queue.Queue = queue.Queue()
         index_in_dag = 0
         # We start with the entry point
-        entry_point_logical_name = entry_point.handler.split(".")[-1]
+        provider_list = self._merge_and_verify_regions_and_providers(entry_point.regions_and_providers, config)[
+            "providers"
+        ]
+        provider = list(provider_list.keys())[0]
+        if provider == ProviderEnum.GCP.value:
+            entry_point_logical_name = entry_point.handler.split(".")[-1]
+        else:
+            entry_point_logical_name = self._get_function_name_without_provider_and_region(entry_point.name)
+
         predecessor_instance = FunctionInstance(
             name=f"{entry_point_logical_name}:entry_point:{index_in_dag}",
             entry_point=entry_point.entry_point,
@@ -130,7 +138,10 @@ class WorkflowBuilder:
             function_to_visit, predecessor_instance_name, successor_of_predecessor_index = functions_to_visit.get()
             caribou_function: CaribouFunction = function_name_to_function[function_to_visit]
 
-            logical_name = caribou_function.handler.split(".")[-1]
+            if provider == ProviderEnum.GCP.value:
+                logical_name = caribou_function.handler.split(".")[-1]
+            else:
+                logical_name = self._get_function_name_without_provider_and_region(caribou_function.name)
             predecessor_instance_name_for_instance = predecessor_instance_name.split(":", maxsplit=1)[0]
             predecessor_index = predecessor_instance_name.split(":")[-1]
             function_instance_name = (
