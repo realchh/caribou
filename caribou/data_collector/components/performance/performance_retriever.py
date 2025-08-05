@@ -10,7 +10,6 @@ from caribou.data_collector.utils.latency_retriever.integration_test_latency_ret
 )
 
 
-# TODO: GCP Latency Retriever
 class PerformanceRetriever(DataRetriever):
     def __init__(self, client: RemoteClient) -> None:
         super().__init__(client)

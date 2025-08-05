@@ -15,6 +15,19 @@ For deployment to AWS see the [Deployment to AWS](#deployment-to-aws) section.
 
 Make sure you first have the necessary dependencies according to how you intend to use Caribou installed. See the [Installation](INSTALL.md) guide for more information.
 
+## Switching between AWS and GCP
+
+You can switch between AWS and GCP deployment using the `CARIBOU_DEFAULT_PROVIDER` environment variable.
+
+To use AWS, execute the following command:
+```
+export CARIBOU_DEFAULT_PROVIDER=aws
+```
+To use GCP, execute the following command:
+```
+export CARIBOU_DEFAULT_PROVIDER=gcp
+```
+
 ## Client side CLI
 
 Some client-side commands can be executed in the `AWS Remote CLI`, provided it is deployed. 

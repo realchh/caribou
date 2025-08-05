@@ -50,6 +50,8 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         if name == "Columbus":
             name = "Columbus, Ohio"  # Somehow Google Maps doesn't know where Columbus, OH is
+        if name == "US East (N. Virginia)":
+            name = "N. Virginia"  # fix for issue #358
         if name == "Canada (Central)":
             name = "Varennes, QC"
         if name == "Malaysia":
