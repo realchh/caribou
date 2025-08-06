@@ -91,34 +91,117 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         if not self._region:
             raise ValueError("GCP region must be provided.")
 
-        client_options = ClientOptions(api_endpoint=f"{self._region}-run.googleapis.com") if self._region else None
-        self._run_client = run_v2.ServicesClient(credentials=self._credentials, client_options=client_options)
-        self._storage_client = storage.Client(project=self._project_id, credentials=self._credentials)
-        self._firestore_client = firestore.Client(credentials=self._credentials)
-        self._firestore_admin_client = firestore_admin_v1.FirestoreAdminClient(credentials=self._credentials)
-
-        batch_settings = pubsub_v1.types.BatchSettings(
-            max_messages=1,  # Max 100 messages per batch
-            max_bytes=10000000,  # Max 10 MB per batch
-            max_latency=0.01,  # Max 0.01s (10ms) to wait before sending
-        )
-
-        self._pubsub_publisher_client = pubsub_v1.PublisherClient(
-            credentials=self._credentials, batch_settings=batch_settings
-        )
-
-        self._pubsub_subscriber_client = pubsub_v1.SubscriberClient(credentials=self._credentials)
-        self._eventarc_client = eventarc_v1.EventarcClient(credentials=self._credentials)
-        self._artifact_registry_client = artifactregistry_v1.ArtifactRegistryClient(credentials=self._credentials)
-        self._iam_admin_client = IAMClient(credentials=self._credentials)
-        self._resource_manager_client = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
-        self._logging_client = logging_v2.Client(credentials=self._credentials)
-        self._monitoring_client = monitoring_v3.MetricServiceClient(credentials=self._credentials)
-        self._scheduling_client = scheduler_v1.CloudSchedulerClient(credentials=self._credentials)
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
         )
+
+        self._client_cache: dict[str, Any] = {}
+
+    # pylint: disable=too-many-branches
+    def _client(self, service_name: str) -> Any:
+        """Lazily initialize and cache GCP service clients."""
+        if service_name not in self._client_cache:
+            if service_name == "run":
+                client_options = (
+                    ClientOptions(api_endpoint=f"{self._region}-run.googleapis.com") if self._region else None
+                )
+                self._client_cache[service_name] = run_v2.ServicesClient(
+                    credentials=self._credentials, client_options=client_options
+                )
+            elif service_name == "storage":
+                self._client_cache[service_name] = storage.Client(
+                    project=self._project_id, credentials=self._credentials
+                )
+            elif service_name == "firestore":
+                self._client_cache[service_name] = firestore.Client(credentials=self._credentials)
+            elif service_name == "firestore_admin":
+                self._client_cache[service_name] = firestore_admin_v1.FirestoreAdminClient(
+                    credentials=self._credentials
+                )
+            elif service_name == "pubsub_publisher":
+                batch_settings = pubsub_v1.types.BatchSettings(
+                    max_messages=1,  # Max 100 messages per batch
+                    max_bytes=10000000,  # Max 10 MB per batch
+                    max_latency=0.01,  # Max 0.01s (10ms) to wait before sending
+                )
+                self._client_cache[service_name] = pubsub_v1.PublisherClient(
+                    credentials=self._credentials, batch_settings=batch_settings
+                )
+            elif service_name == "pubsub_subscriber":
+                self._client_cache[service_name] = pubsub_v1.SubscriberClient(credentials=self._credentials)
+            elif service_name == "eventarc":
+                self._client_cache[service_name] = eventarc_v1.EventarcClient(credentials=self._credentials)
+            elif service_name == "artifact_registry":
+                self._client_cache[service_name] = artifactregistry_v1.ArtifactRegistryClient(
+                    credentials=self._credentials
+                )
+            elif service_name == "iam_admin":
+                self._client_cache[service_name] = IAMClient(credentials=self._credentials)
+            elif service_name == "resource_manager":
+                self._client_cache[service_name] = resourcemanager_v3.ProjectsClient(credentials=self._credentials)
+            elif service_name == "logging":
+                self._client_cache[service_name] = logging_v2.Client(credentials=self._credentials)
+            elif service_name == "monitoring":
+                self._client_cache[service_name] = monitoring_v3.MetricServiceClient(credentials=self._credentials)
+            elif service_name == "scheduling":
+                self._client_cache[service_name] = scheduler_v1.CloudSchedulerClient(credentials=self._credentials)
+            else:
+                raise ValueError(f"Unknown service name: {service_name}")
+
+        return self._client_cache[service_name]
+
+    @property
+    def _run_client(self) -> run_v2.ServicesClient:
+        return self._client("run")
+
+    @property
+    def _storage_client(self) -> storage.Client:
+        return self._client("storage")
+
+    @property
+    def _firestore_client(self) -> firestore.Client:
+        return self._client("firestore")
+
+    @property
+    def _firestore_admin_client(self) -> firestore_admin_v1.FirestoreAdminClient:
+        return self._client("firestore_admin")
+
+    @property
+    def _pubsub_publisher_client(self) -> pubsub_v1.PublisherClient:
+        return self._client("pubsub_publisher")
+
+    @property
+    def _pubsub_subscriber_client(self) -> pubsub_v1.SubscriberClient:
+        return self._client("pubsub_subscriber")
+
+    @property
+    def _eventarc_client(self) -> eventarc_v1.EventarcClient:
+        return self._client("eventarc")
+
+    @property
+    def _artifact_registry_client(self) -> artifactregistry_v1.ArtifactRegistryClient:
+        return self._client("artifact_registry")
+
+    @property
+    def _iam_admin_client(self) -> IAMClient:
+        return self._client("iam_admin")
+
+    @property
+    def _resource_manager_client(self) -> resourcemanager_v3.ProjectsClient:
+        return self._client("resource_manager")
+
+    @property
+    def _logging_client(self) -> logging_v2.Client:
+        return self._client("logging")
+
+    @property
+    def _monitoring_client(self) -> monitoring_v3.MetricServiceClient:
+        return self._client("monitoring")
+
+    @property
+    def _scheduling_client(self) -> scheduler_v1.CloudSchedulerClient:
+        return self._client("scheduling")
 
     def get_current_provider_region(self) -> str:
         return f"gcp_{self._region}"

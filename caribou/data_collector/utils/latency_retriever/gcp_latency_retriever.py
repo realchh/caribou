@@ -109,12 +109,7 @@ class GCPLatencyRetriever(LatencyRetriever):
 
             median_latency = np.median(latencies)
             aggregated_region_latency_dict[src_reg][dst_reg]["p_50"] = median_latency
-
-            sigma = 0.3
-            mu = np.log(median_latency) - (sigma**2 / 2)
-            samples = np.random.lognormal(mean=mu, sigma=sigma, size=100)
-            samples = samples / 1000.0  # Convert to seconds
-            aggregated_region_latency_dict[src_reg][dst_reg]["distribution"] = samples.tolist()
+            aggregated_region_latency_dict[src_reg][dst_reg]["distribution"] = [median_latency]
 
         result = dict(aggregated_region_latency_dict)
 
@@ -156,13 +151,10 @@ class GCPLatencyRetriever(LatencyRetriever):
             return latency_information["distribution"]
 
         # Default case for GCP for now: google cloud monitoring only reports median latency
+        # Issue #359
         if len(latency_information) == 1 and "p_50" in latency_information:
             median_latency = latency_information["p_50"]
-            sigma = 0.3
-            mu = np.log(median_latency) - (sigma**2 / 2)
-            samples = np.random.lognormal(mean=mu, sigma=sigma, size=100)
-            samples = samples / 1000.0  # Convert to seconds
-            return samples.tolist()
+            return [median_latency]
 
         log_percentiles = np.log(list(latency_information.values()))
 

@@ -246,7 +246,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
 
         pue_dict = self._retrieve_aws_pue(aws_regions)
 
-        # data obtained from https://www.cloudcarbonfootprint.org/docs/methodology/#gcp-1
+        # data obtained from https://www.cloudcarbonfootprint.org/docs/methodology/#aws-1
         return {
             region_key: {
                 "execution_cost": execution_cost_dict[region_key],
@@ -272,6 +272,7 @@ class ProviderRetriever(DataRetriever):  # pylint: disable=too-many-instance-att
         ecr_cost_dict = self._retrieve_gcp_artifact_registry_cost(gcp_regions)
         pue_dict = self._retrieve_gcp_pue(gcp_regions)
 
+        # data obtained from https://www.cloudcarbonfootprint.org/docs/methodology/#gcp-1
         return {
             region_key: {
                 "execution_cost": execution_cost_dict[region_key],

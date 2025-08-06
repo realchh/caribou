@@ -18,6 +18,7 @@ from caribou.syncers.log_syncer import LogSyncer
 
 if "K_SERVICE" in os.environ:
     # We are in GCP, so we need to set up the gcp logging client.
+    # Cloud Run env variables: https://cloud.google.com/run/docs/container-contract#services-env-vars
     import google.cloud.logging
 
     gcp_logging_client = google.cloud.logging.Client()

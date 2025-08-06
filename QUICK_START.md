@@ -48,7 +48,9 @@ Where `<workflow_name>` is the name of the new workflow.
 
 You can then use the Caribou Python API to define and develop the workflow.
 
-### Workflow ID
+#### Note: for GCP functions, please refer to cloud run [CPU limits](https://cloud.google.com/run/docs/configuring/services/cpu#setting) and [memory limits](https://cloud.google.com/run/docs/configuring/services/memory-limits#cpu-minimum).
+
+### Workflow ID
 
 When a new workflow is set up, it is initialized with the semantic version `0.0.1` as configured in the config and `app.py` workflow initialization.
 This, together with the `<workflow_name>`, will constitute the workflow ID (`<workflow_name>-<version_number>`).

@@ -8,7 +8,8 @@ from caribou.monitors.monitor import Monitor
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Only add a StreamHandler if not running in AWS Lambda
+# Only add a StreamHandler if not running in AWS Lambda or GCP Cloud Run
+# Cloud Run env variables: https://cloud.google.com/run/docs/container-contract#services-env-vars
 if "AWS_LAMBDA_FUNCTION_NAME" not in os.environ or "K_SERVICE" not in os.environ:
     if not logger.handlers:
         logger.addHandler(logging.StreamHandler())

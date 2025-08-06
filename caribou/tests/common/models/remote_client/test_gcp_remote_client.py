@@ -2297,6 +2297,7 @@ class TestGCPRemoteClientPerformance(unittest.TestCase):
 
     def test_batch_operations_performance(self):
         """Test batch settings for Pub/Sub operations"""
+        client = self.gcp_client._pubsub_publisher_client
         # Verify batch settings are configured for performance
         self.mock_pubsub.types.BatchSettings.assert_called_with(
             max_messages=1, max_bytes=10000000, max_latency=0.01  # 10 MB  # 10ms

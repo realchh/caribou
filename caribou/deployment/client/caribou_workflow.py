@@ -36,6 +36,7 @@ from caribou.deployment.client.caribou_function import CaribouFunction
 
 if "K_SERVICE" in os.environ:
     # We are in GCP, so we need to set up the gcp logging client.
+    # Cloud Run env variables: https://cloud.google.com/run/docs/container-contract#services-env-vars
     import google.cloud.logging
 
     gcp_logging_client = google.cloud.logging.Client()
@@ -115,33 +116,14 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self._function_names: set[str] = set()
         self._endpoint: Endpoints | None = None
 
-        # self._current_workflow_placement_decision: dict[str, Any] = {}
-
         # Make workflow placement decision thread-local instead of shared across all executions
         self._thread_local: threading.local = threading.local()
-
-        # For thread pool -> Invoke successor functions asynchronously
-        # self._thread_pool: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-        # self._futures: list[Future] = []
-
-        # For logging
-        ## This will be overritten by the first function that is called
-        ## Just here as a placeholder to avoid using None
-        # self._function_start_time: datetime = datetime.now(GLOBAL_TIME_ZONE)
 
         # For redirecting the function to the home region
         self._home_region_threshold: float = HOME_REGION_THRESHOLD  # fractional % of the time run in home region
 
         # Cache for max number of worker thread
         self._max_concurrent_ops_cache: dict[str, int] = {}
-
-        # Track the number of hops from client request
-        # To forcefully terminate the workflow if it exceeds a certain number
-        ## This will be overritten by input function arguments
-        # self._number_of_hops_from_client_request: int = 0
-
-        # Cache the remote clients (one per provider-region pair)
-        # self._remote_clients: dict[str, RemoteClient] = {}
 
     def _get_provider_optimal_thread_count(
         self, current_instance_name: str, workflow_placement_decision: dict[str, Any]
@@ -181,7 +163,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         return max_concurrent
 
-    def _ensure_endpoint(self) -> Endpoints:
+    def _get_endpoint(self) -> Endpoints:
         if self._endpoint is None:
             self._endpoint = Endpoints()
         return self._endpoint
@@ -668,6 +650,10 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self._thread_local.current_workflow_placement_decision = workflow_placement_decision
 
     def _get_function_start_time(self) -> datetime:
+        # For logging
+
+        ## This first call will be overritten by the first function that is called
+        ## Just here as a placeholder to avoid using None
         if not hasattr(self._thread_local, "function_start_time"):
             self._thread_local.function_start_time = datetime.now(GLOBAL_TIME_ZONE)
         return self._thread_local.function_start_time
@@ -676,6 +662,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self._thread_local.function_start_time = start_time
 
     def _get_number_of_hops(self) -> int:
+        # Track the number of hops from client request
+        # To forcefully terminate the workflow if it exceeds a certain number
+        ## This first call will be overritten by input function arguments
         if not hasattr(self._thread_local, "number_of_hops_from_client_request"):
             self._thread_local.number_of_hops_from_client_request = 0
         return self._thread_local.number_of_hops_from_client_request
@@ -796,7 +785,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         """
         Get the workflow_placement decision from the platform.
         """
-        endpoint = self._ensure_endpoint()
+        endpoint = self._get_endpoint()
         (
             result,
             consumed_read_capacity,

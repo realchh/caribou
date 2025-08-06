@@ -33,9 +33,9 @@ regions_and_providers:
     gcp:
       config:
         timeout: 300
-        memory: 1024
-        vcpu: 1.0
-        concurrency: 10
+        memory: 768
+        vcpu: 0.5
+        concurrency: 1
         additional_docker_commands:
           - "apt-get update -y"
           - "apt-get install -y tar gzip"

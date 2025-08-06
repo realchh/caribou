@@ -366,8 +366,7 @@ class WorkflowLoader(InputLoader):
                 # for aws lambda https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html
                 vcpu = self.get_memory(instance_name, provider_name) / 1769
             elif provider_name == Provider.GCP.value:
-                memory_size = self.get_memory(instance_name, provider_name)
-                vcpu = max(1.0, memory_size // 1024)
+                vcpu = self.get_gcp_vcpu(instance_name, provider_name)
             else:
                 raise ValueError(
                     f"vCPU count for instance {instance_name} in provider {provider_name} is not available"
@@ -382,6 +381,14 @@ class WorkflowLoader(InputLoader):
             .get("config", {})
             .get("memory")
         )  # Memory MUST exist for a valid workflow
+
+    def get_gcp_vcpu(self, instance_name: str, provider_name: str) -> float:
+        return (
+            self._instances_regions_and_providers.get(instance_name, {})
+            .get(provider_name, {})
+            .get("config", {})
+            .get("vcpu")
+        )  # vCPU MUST exist for a valid GCP workflow
 
     def get_architecture(self, instance_name: str, provider_name: str) -> str:
         return (
