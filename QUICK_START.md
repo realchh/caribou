@@ -28,6 +28,8 @@ To use GCP, execute the following command:
 export CARIBOU_DEFAULT_PROVIDER=gcp
 ```
 
+### Important: If you are changing the framework's home region, please teardown the framework before changing the default. Not doing so will cause inaccessible, hanging functions.
+
 ## Client side CLI
 
 Some client-side commands can be executed in the `AWS Remote CLI`, provided it is deployed. 

@@ -33,5 +33,6 @@ regions_and_providers:
     gcp:
       config:
         timeout: 1200
-        memory: 8192
-        vcpu: 8.0
+        memory: 4096
+        vcpu: 2.0
+        concurrency: 10

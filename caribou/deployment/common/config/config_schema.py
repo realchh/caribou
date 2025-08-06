@@ -44,6 +44,8 @@ class RegionAndProviders(BaseModel):
                     raise ValueError("The 'config' dictionary must contain 'timeout' key with an integer value")
                 if "vcpu" not in config or not isinstance(config["vcpu"], float):
                     raise ValueError("The 'config' dictionary must contain 'vcpu' key with a float value")
+                if "concurrency" not in config or not isinstance(config["concurrency"], int):
+                    raise ValueError("The 'config' dictionary must contain 'concurrency' key with an integer value")
 
                 vcpu = config["vcpu"]
                 # Valid values are in the range [0.08, 1.0] or in the discrete set {2.0, 4.0, 6.0, 8.0}
@@ -54,6 +56,11 @@ class RegionAndProviders(BaseModel):
                     raise ValueError(
                         "The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
                     )
+
+                concurrency = config["concurrency"]
+                if concurrency < 1 or concurrency > 1000:
+                    raise ValueError("The 'concurrency' value must be between 1 and 1000 inclusive")
+
         return values
 
 

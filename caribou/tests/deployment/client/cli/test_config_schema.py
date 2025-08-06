@@ -72,7 +72,9 @@ class TestConfigSchema(unittest.TestCase):
         RegionAndProviders(providers={"provider1": Provider(config={"memory": 512, "timeout": 10})})
 
     def test_validate_config_gcp_valid_config(self):
-        RegionAndProviders(providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 1.0})})
+        RegionAndProviders(
+            providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 1.0, "concurrency": 10})}
+        )
 
     def test_validate_config_gcp_missing_timeout(self):
         with pytest.raises(
@@ -92,13 +94,17 @@ class TestConfigSchema(unittest.TestCase):
         with pytest.raises(
             ValueError, match="The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
         ):
-            RegionAndProviders(providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 0.01})})
+            RegionAndProviders(
+                providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 0.01, "concurrency": 10})}
+            )
 
     def test_validate_config_gcp_invalid_vcpu_not_in_list(self):
         with pytest.raises(
             ValueError, match="The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
         ):
-            RegionAndProviders(providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 3.0})})
+            RegionAndProviders(
+                providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 3.0, "concurrency": 10})}
+            )
 
     def test_constraint_invalid_type(self):
         with pytest.raises(ValueError, match="Constraint type invalid is not supported"):

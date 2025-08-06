@@ -35,6 +35,7 @@ regions_and_providers:
         timeout: 300
         memory: 1024
         vcpu: 1.0
+        concurrency: 10
         additional_docker_commands:
           - "apt-get update -y"
           - "apt-get install -y tar gzip"

@@ -228,6 +228,8 @@ class TestGCPRemoteClient(unittest.TestCase):
         environment_variables = {"TEST_VAR": "test_value"}
         timeout = 300
         memory_size = 512
+        vcpu = 1.0
+        concurrency = 10
 
         # Mock temporary directory context manager
         mock_temp_context = MagicMock()
@@ -259,6 +261,8 @@ class TestGCPRemoteClient(unittest.TestCase):
                     environment_variables,
                     timeout,
                     memory_size,
+                    vcpu,
+                    concurrency,
                 )
 
         self.assertEqual(result, "https://test-function.run.app")
@@ -1991,6 +1995,8 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         environment_variables = {"TEST_VAR": "test_value", "ANOTHER_VAR": "another_value"}
         timeout = 300
         memory_size = 1024
+        vcpu = 1.0
+        concurrency = 10
 
         # Mock temporary directory
         mock_temp_context = MagicMock()
@@ -2030,7 +2036,16 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
 
         # Execute the function creation
         result = self.gcp_client.create_function(
-            function_name, role_identifier, zip_contents, runtime, handler, environment_variables, timeout, memory_size
+            function_name,
+            role_identifier,
+            zip_contents,
+            runtime,
+            handler,
+            environment_variables,
+            timeout,
+            memory_size,
+            vcpu,
+            concurrency,
         )
 
         # Verify the complete workflow

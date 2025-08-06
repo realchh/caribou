@@ -35,3 +35,4 @@ regions_and_providers:
         timeout: 120
         memory: 1024
         vcpu: 1.0
+        concurrency: 10

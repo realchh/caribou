@@ -453,6 +453,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         timeout: int,
         memory_size: int,
         cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         image_uri: str
@@ -486,6 +487,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         final_cpu = self._get_gcp_cpu_config(cpu, memory_size)
 
+        if concurrency is None:
+            raise RuntimeError("No concurrency specified")
+
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
@@ -494,6 +498,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             memory_mib=memory_size,
             timeout_s=timeout,
             service_account_email=role_identifier,
+            max_concurrency=concurrency,
         )
 
         return service_url
@@ -507,7 +512,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         memory_mib: int,
         timeout_s: int,
         service_account_email: str,
-        max_concurrency: int = 10,
+        max_concurrency: int,
     ) -> str:
         client = self._run_client
         parent = f"projects/{self._project_id}/locations/{self._region}"
@@ -721,6 +726,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         timeout: int,
         memory_size: int,
         cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         image_uri: str
@@ -751,6 +757,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         final_cpu = self._get_gcp_cpu_config(cpu, memory_size)
 
+        if concurrency is None:
+            raise RuntimeError("No concurrency specified")
+
         service_url = self._create_cloud_run_service(
             service_name=function_name,
             image_uri=image_uri,
@@ -759,6 +768,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             memory_mib=memory_size,
             timeout_s=timeout,
             service_account_email=role_identifier,
+            max_concurrency=concurrency,
         )
 
         return service_url
@@ -1469,6 +1479,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             memory_mib=memory_and_storage,
             timeout_s=timeout if timeout >= 1 else 0,
             service_account_email=service_account_email,
+            max_concurrency=80,
         )
 
         print(f"Caribou Lambda Framework remote cli function {function_name}" f" created successfully, with url: {url}")

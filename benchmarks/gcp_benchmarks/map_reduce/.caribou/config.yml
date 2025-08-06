@@ -37,4 +37,5 @@ regions_and_providers:
       config:
         timeout: 300
         memory: 2048
-        vcpu: 2.0
+        vcpu: 1.0
+        concurrency: 80

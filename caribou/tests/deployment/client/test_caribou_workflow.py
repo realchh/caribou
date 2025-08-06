@@ -19,7 +19,7 @@ from caribou.common.constants import (
     HOME_REGION_THRESHOLD,
     LOG_VERSION,
     MAX_TRANSFER_SIZE,
-    MAX_WORKERS,
+    MAX_AWS_WORKERS,
     MAXIMUM_HOPS_FROM_CLIENT_REQUEST,
     TIME_FORMAT,
     WORKFLOW_PLACEMENT_DECISION_TABLE,
@@ -1380,7 +1380,7 @@ class TestCaribouWorkflow(unittest.TestCase):
             thread_count = self.workflow._get_provider_optimal_thread_count(
                 "test_instance", workflow_placement_decision
             )
-            self.assertEqual(thread_count, MAX_WORKERS)  # AWS should always be 1
+            self.assertEqual(thread_count, MAX_AWS_WORKERS)  # AWS should always be 1
 
         # Test GCP provider
         with patch.dict(os.environ, {"CARIBOU_DEFAULT_PROVIDER": "gcp"}):

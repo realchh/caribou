@@ -19,10 +19,10 @@ from caribou.common.constants import (
     GLOBAL_TIME_ZONE,
     HOME_REGION_THRESHOLD,
     LOG_VERSION,
+    MAX_AWS_WORKERS,
     MAX_GCP_TRANSFER_SIZE,
     MAX_GCP_WORKERS,
     MAX_TRANSFER_SIZE,
-    MAX_WORKERS,
     MAXIMUM_HOPS_FROM_CLIENT_REQUEST,
     TIME_FORMAT,
     WORKFLOW_PLACEMENT_DECISION_TABLE,
@@ -152,13 +152,13 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
 
         if provider == Provider.AWS.value:
-            return MAX_WORKERS
+            return MAX_AWS_WORKERS
 
         if provider == Provider.GCP.value:
             return self._get_max_gcp_concurrent_operations(current_instance_name, workflow_placement_decision)
 
         # Default fallback (could add Azure, testing purposes, etc.)
-        return MAX_WORKERS
+        return MAX_AWS_WORKERS
 
     def _get_max_gcp_concurrent_operations(
         self, current_instance_name: str, workflow_placement_decision: dict[str, Any]

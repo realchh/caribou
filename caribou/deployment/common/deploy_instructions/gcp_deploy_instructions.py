@@ -38,6 +38,7 @@ class GCPDeployInstructions(DeployInstructions):
         function_varname: str,
     ) -> Instruction:
         memory_size = self._config["memory"]
+        concurrency = self._config["concurrency"]
         return APICall(
             name="create_function",
             params={
@@ -50,6 +51,7 @@ class GCPDeployInstructions(DeployInstructions):
                 "timeout": self._config["timeout"],
                 "memory_size": memory_size,
                 "cpu": self._config.get("vcpu", max(1.0, memory_size // 1024)),
+                "concurrency": concurrency,
                 "additional_docker_commands": self._config.get("additional_docker_commands", []),
             },
             output_var=function_varname,
@@ -66,6 +68,7 @@ class GCPDeployInstructions(DeployInstructions):
         function_varname: str,
     ) -> Instruction:
         memory_size = self._config["memory"]
+        concurrency = self._config["concurrency"]
         return APICall(
             name="update_function",
             params={
@@ -78,6 +81,7 @@ class GCPDeployInstructions(DeployInstructions):
                 "timeout": self._config["timeout"],
                 "memory_size": memory_size,
                 "cpu": self._config.get("vcpu", max(1.0, memory_size // 1024)),
+                "concurrency": concurrency,
                 "additional_docker_commands": self._config.get("additional_docker_commands", []),
             },
             output_var=function_varname,

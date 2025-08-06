@@ -40,3 +40,4 @@ regions_and_providers: # Either the user specify only allowed regions (which wil
         timeout: 60
         memory: 1024
         vcpu: 1.0
+        concurrency: 80
