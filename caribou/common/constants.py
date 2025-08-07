@@ -143,7 +143,7 @@ COARSE_GRAINED_DEPLOYMENT_ALGORITHM_CARBON_PER_INSTANCE_INVOCATION_ESTIMATE = 0.
 STOCHASTIC_HEURISTIC_DEPLOYMENT_ALGORITHM_CARBON_PER_INSTANCE_INVOCATION_ESTIMATE = 0.0001
 MIGRATION_COST_ESTIMATE = 0.0001
 DEFAULT_MONITOR_COOLDOWN = 60 * 60 * 24
-MINIMAL_SOLVE_THRESHOLD = 1
+MINIMAL_SOLVE_THRESHOLD = 10
 DISTANCE_FOR_POTENTIAL_MIGRATION = 4000
 
 # Logging
@@ -167,11 +167,11 @@ TIME_FORMAT_DAYS = "%Y-%m-%d%z"
 FORGETTING_TIME_DAYS = 30  # 30 days
 FORGETTING_NUMBER = 5000  # 5000 invocations
 KEEP_ALIVE_DATA_COUNT = 10  # Keep sample it is part of any of the 10 samples for any execution or transmission
-MIN_TIME_BETWEEN_SYNC = 1  # In Minutes
+MIN_TIME_BETWEEN_SYNC = 15  # In Minutes
 
 ## Grace period for the log-syncer
 ## Used as lambda insights can be delayed
-BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD = 1  # In minutes
+BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD = 15  # In minutes
 
 BUFFER_GCP_METRICS_GRACE_PERIOD = 5  # In minutes (visible after 4 minutes, 1 minute is for redundancy)
 # https://cloud.google.com/monitoring/api/v3/latency-n-retention#latency
