@@ -150,7 +150,9 @@ poetry run caribou log_sync
 This might take a while, depending on the number of workflows and the amount of logs that need to be synced.
 Also, there is an inherent buffer of fifteen minutes, meaning that logs are only synced if they are at least fifteen minutes old.
 
-**Note:** May be executed remotely with the `-r` or `--remote` flag to execute them remotely and asynchronously. 
+**Note:** May be executed remotely with the `-r` or `--remote` flag to execute them remotely and asynchronously.
+
+**Note 2:** In GCP, there is a default quota for reading logs of 60 log entry list requests per minute. We implemented a default delay of 1 seconds between each request, which fetches up to 1000 logs at once.
 
 ### Data Collecting
 

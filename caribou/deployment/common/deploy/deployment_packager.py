@@ -440,6 +440,12 @@ class DeploymentPackager:
 
         for root, _, files in os.walk(project_dir):
             for filename in files:
+                if filename.startswith("geo.generated.json"):
+                    full_path = os.path.join(root, filename)
+                    if full_path.startswith(framework_dir):
+                        zip_path = full_path[len(project_dir) + 1 :]
+                        zip_file.write(full_path, zip_path)
+
                 if not filename.endswith(".py") or filename.startswith("test_"):  # Only add .py files, also skip tests
                     continue
 

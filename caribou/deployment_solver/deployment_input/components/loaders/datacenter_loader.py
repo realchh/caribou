@@ -10,6 +10,7 @@ from caribou.common.constants import (
     SOLVER_INPUT_DYNAMODB_WRITE_COST_DEFAULT,
     SOLVER_INPUT_ECR_MONTHLY_STORAGE_COST_DEFAULT,
     SOLVER_INPUT_GCP_ARTIFACT_REGISTRY_MONTHLY_STORAGE_COST_DEFAULT,
+    SOLVER_INPUT_GCP_COMPUTE_COST_DEFAULT,
     SOLVER_INPUT_GCP_FIRESTORE_READ_COST_DEFAULT,
     SOLVER_INPUT_GCP_FIRESTORE_WRITE_COST_DEFAULT,
     SOLVER_INPUT_GCP_INVOCATION_COST_DEFAULT,
@@ -115,7 +116,14 @@ class DatacenterLoader(InputLoader):
 
         return self._datacenter_data.get(region_name, {}).get("ecr_cost", {}).get("storage_cost", default_ecr_cost)
 
-    def get_compute_cost(self, region_name: str, architecture: str) -> float:
+    def get_compute_cost(self, region_name: str, architecture: str) -> float | dict[str, float]:
+        provider = region_name.split(":")[0]
+        if provider == Provider.GCP.value:
+            return (
+                self._datacenter_data.get(region_name, {})
+                .get("execution_cost", {})
+                .get("compute_cost", SOLVER_INPUT_GCP_COMPUTE_COST_DEFAULT)
+            )
         return (
             self._datacenter_data.get(region_name, {})
             .get("execution_cost", {})

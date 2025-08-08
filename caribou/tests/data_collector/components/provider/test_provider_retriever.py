@@ -418,15 +418,25 @@ class TestProviderRetriever(unittest.TestCase):
 
     @patch("caribou.data_collector.components.provider.provider_retriever.ProviderRetriever.retrieve_aws_regions")
     @patch("caribou.data_collector.components.provider.provider_retriever.ProviderRetriever.retrieve_gcp_regions")
-    def test_retrieve_available_regions(self, mock_retrieve_aws_regions, mock_retrieve_gcp_regions):
+    @patch("caribou.data_collector.components.provider.provider_retriever.os.environ.get")
+    def test_retrieve_available_regions(
+        self, mock_os_environ_get, mock_retrieve_gcp_regions, mock_retrieve_aws_regions
+    ):
         mock_retrieve_aws_regions.return_value = {"aws:dummy_region": {"code": "dummy_region"}}
         mock_retrieve_gcp_regions.return_value = {"gcp:dummy_region2": {"code": "dummy_region2"}}
+        mock_os_environ_get.return_value = "gcp"
+
+        result = self.provider_retriever.retrieve_available_regions()
+        self.assertNotIn("aws:dummy_region", result)
+        self.assertIn("gcp:dummy_region2", result)
+        self.assertEqual(result["gcp:dummy_region2"]["code"], "dummy_region2")
+
+        mock_os_environ_get.return_value = "aws"
 
         result = self.provider_retriever.retrieve_available_regions()
         self.assertIn("aws:dummy_region", result)
-        self.assertIn("gcp:dummy_region2", result)
+        self.assertNotIn("gcp:dummy_region2", result)
         self.assertEqual(result["aws:dummy_region"]["code"], "dummy_region")
-        self.assertEqual(result["gcp:dummy_region2"]["code"], "dummy_region2")
 
     @patch("caribou.data_collector.components.provider.provider_retriever.boto3.client")
     @patch("requests.get")
@@ -1075,7 +1085,18 @@ class TestProviderRetrieverExtended(unittest.TestCase):
     # Test for retrieve_gcp_regions (lines 138-171)
     @patch("requests.get")
     @patch("googlemaps.Client")
-    def test_retrieve_gcp_regions(self, mock_googlemaps_client, mock_requests_get):
+    @patch.dict(
+        "os.environ", {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False", "CARIBOU_DEFAULT_PROVIDER": "gcp"}
+    )
+    @patch("boto3.client")
+    @patch("caribou.common.utils.str_to_bool")
+    @patch("google.cloud.billing_v1.CloudCatalogClient")
+    def test_retrieve_gcp_regions(
+        self, mock_catalog_client, mock_str_to_bool, mock_boto3, mock_googlemaps_client, mock_requests_get
+    ):
+        mock_str_to_bool.return_value = False
+        mock_boto3.return_value = MagicMock()
+
         mock_html_content = """
         <html>
             <body>
@@ -1104,7 +1125,10 @@ class TestProviderRetrieverExtended(unittest.TestCase):
             {"geometry": {"location": {"lat": 41.2619, "lng": -95.8608}}}
         ]
 
-        result = self.provider_retriever.retrieve_gcp_regions()
+        # Create a GCP provider instance
+        gcp_provider_retriever = ProviderRetriever(MagicMock(spec=RemoteClient))
+
+        result = gcp_provider_retriever.retrieve_gcp_regions()
 
         self.assertIn("gcp:us-central1", result)
         self.assertIn("gcp:europe-west1", result)
@@ -1280,20 +1304,48 @@ class TestProviderRetrieverExtended(unittest.TestCase):
 
     # Test for _retrieve_gcp_firestore_cost with no Firestore service (line 867)
     @patch.object(billing_v1.CloudCatalogClient, "list_services")
-    def test_retrieve_gcp_firestore_cost_no_service(self, mock_list_services):
+    @patch.dict(
+        "os.environ", {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False", "CARIBOU_DEFAULT_PROVIDER": "gcp"}
+    )
+    @patch("boto3.client")
+    @patch("caribou.common.utils.str_to_bool")
+    @patch("googlemaps.Client")
+    @patch("google.cloud.billing_v1.CloudCatalogClient")
+    def test_retrieve_gcp_firestore_cost_no_service(
+        self, mock_catalog_client, mock_googlemaps, mock_str_to_bool, mock_boto3, mock_list_services
+    ):
+        mock_str_to_bool.return_value = False
+        mock_boto3.return_value = MagicMock()
         mock_list_services.return_value = []
 
+        # Create a GCP provider instance
+        gcp_provider_retriever = ProviderRetriever(MagicMock(spec=RemoteClient))
+
         with self.assertRaises(RuntimeError) as context:
-            self.provider_retriever._retrieve_gcp_firestore_cost(["gcp:us-central1"])
+            gcp_provider_retriever._retrieve_gcp_firestore_cost(["gcp:us-central1"])
         self.assertIn("Could not find Firestore service", str(context.exception))
 
     # Test for _retrieve_gcp_artifact_registry_cost with no service (line 933)
     @patch.object(billing_v1.CloudCatalogClient, "list_services")
-    def test_retrieve_gcp_artifact_registry_cost_no_service(self, mock_list_services):
+    @patch.dict(
+        "os.environ", {"GOOGLE_API_KEY": "test_key", "INTEGRATIONTEST_ON": "False", "CARIBOU_DEFAULT_PROVIDER": "gcp"}
+    )
+    @patch("boto3.client")
+    @patch("caribou.common.utils.str_to_bool")
+    @patch("googlemaps.Client")
+    @patch("google.cloud.billing_v1.CloudCatalogClient")
+    def test_retrieve_gcp_artifact_registry_cost_no_service(
+        self, mock_catalog_client, mock_googlemaps, mock_str_to_bool, mock_boto3, mock_list_services
+    ):
+        mock_str_to_bool.return_value = False
+        mock_boto3.return_value = MagicMock()
         mock_list_services.return_value = []
 
+        # Create a GCP provider instance
+        gcp_provider_retriever = ProviderRetriever(MagicMock(spec=RemoteClient))
+
         with self.assertRaises(RuntimeError) as context:
-            self.provider_retriever._retrieve_gcp_artifact_registry_cost(["gcp:us-central1"])
+            gcp_provider_retriever._retrieve_gcp_artifact_registry_cost(["gcp:us-central1"])
         self.assertIn("Could not find artifact registry service", str(context.exception))
 
     # Test for _retrieve_gcp_transmission_cost (lines 1021-1071)

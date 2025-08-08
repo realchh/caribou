@@ -84,7 +84,7 @@ SOLVER_INPUT_GCP_PUE_DEFAULT = 1.09
 SOLVER_INPUT_CFE_DEFAULT = 0.0
 
 SOLVER_INPUT_COMPUTE_COST_DEFAULT = 1.66667e-05  # of AWS x86_64 architecture Ohio region
-SOLVER_INPUT_GCP_COMPUTE_COST_DEFAULT = 2.4e-05  # of GCP Tier 1 regions
+SOLVER_INPUT_GCP_COMPUTE_COST_DEFAULT = {"cpu_s": 2.4e-05, "memory_gb_s": 2.5e-06}  # of GCP Tier 1 regions
 
 SOLVER_INPUT_INVOCATION_COST_DEFAULT = 2e-07  # of AWS x86_64 architecture Ohio region
 SOLVER_INPUT_GCP_INVOCATION_COST_DEFAULT = 0.4 / 1000000  # of GCP Tier 1 regions
@@ -168,6 +168,11 @@ FORGETTING_TIME_DAYS = 30  # 30 days
 FORGETTING_NUMBER = 5000  # 5000 invocations
 KEEP_ALIVE_DATA_COUNT = 10  # Keep sample it is part of any of the 10 samples for any execution or transmission
 MIN_TIME_BETWEEN_SYNC = 15  # In Minutes
+
+GCP_LOG_SYNCER_DEFAULT_DELAY = (
+    1.2  # In seconds. Aims for a 50 requests per minute rate of 60 requests per minute limit.
+)
+# see https://cloud.google.com/logging/quotas#api-limits for details.
 
 ## Grace period for the log-syncer
 ## Used as lambda insights can be delayed

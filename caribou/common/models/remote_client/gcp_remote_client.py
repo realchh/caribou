@@ -42,6 +42,7 @@ from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
     FIRESTORE_TTL_FIELD_NAME,
+    GCP_LOG_SYNCER_DEFAULT_DELAY,
     GLOBAL_GCP_SYSTEM_REGION,
     REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
     REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME,
@@ -97,6 +98,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         )
 
         self._client_cache: dict[str, Any] = {}
+        self._last_request_time = 0.0
 
     # pylint: disable=too-many-branches
     def _client(self, service_name: str) -> Any:
@@ -1243,6 +1245,8 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             raise RuntimeError(f"Could not delete resource {key} from database: {e}") from e
 
     def _log_filter(self, service_name: str, start: datetime | None = None, end: datetime | None = None) -> list[str]:
+        max_retries = 5
+
         if start:
             time_start = start.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         else:
@@ -1268,14 +1272,85 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             query += f' AND timestamp<="{time_end}"'
 
         client = self._logging_client
-        entries = client.list_entries(filter_=query, order_by=logging_v2.DESCENDING)
 
-        result = []
-        for entry in entries:
-            json_result = json.dumps(entry.to_api_repr())
-            result.append(json_result)
+        last_exception = None
 
-        return result
+        for attempt in range(max_retries + 1):
+            try:
+                result = []
+                entry_count = 0
+
+                # Apply rate limiting before each request except for the first one
+                if attempt > 0:
+                    self._wait_for_rate_limit()
+
+                entries = client.list_entries(
+                    filter_=query,
+                    order_by=logging_v2.DESCENDING,
+                    page_size=1000,
+                )
+
+                for entry in entries:
+                    json_result = json.dumps(entry.to_api_repr())
+                    result.append(json_result)
+                    entry_count += 1
+
+                return result
+
+            except Exception as e:  # pylint: disable=broad-except
+                last_exception = e
+
+                if not self._should_retry(e):
+                    logging.error("Non-retryable error for service %s: %s", service_name, e)
+                    raise
+
+                if attempt < max_retries:
+                    retry_delay = self._calculate_retry_delay(attempt)
+                    logging.warning(
+                        "Retry %d/%d for service %s after %.2f s delay. Error: %s",
+                        attempt + 1,
+                        max_retries,
+                        service_name,
+                        retry_delay,
+                        e,
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    logging.error("Max retries exceeded for service %s: %s", service_name, e)
+
+        if last_exception:
+            raise last_exception
+
+        raise RuntimeError(f"Failed  to retrieve logs for {service_name} after {max_retries} retries")
+
+    def _wait_for_rate_limit(self) -> None:
+        """Ensure we don't exceed rate limits by adding delay between requests."""
+        current_time = time.time()
+        min_request_interval = GCP_LOG_SYNCER_DEFAULT_DELAY
+        # from: https://cloud.google.com/logging/quotas#api-limits
+        time_since_last = current_time - self._last_request_time
+
+        if time_since_last < min_request_interval:
+            sleep_time = min_request_interval - time_since_last
+            logging.info("Rate limiting: sleeping for %.2f seconds", sleep_time)
+            time.sleep(sleep_time)
+
+        self._last_request_time = time.time()
+
+    def _should_retry(self, exception: Exception) -> bool:
+        """Determine if we should retry based on the exception."""
+        if isinstance(exception, google_api_exceptions.ResourceExhausted):
+            # Check if it's a quota/rate limit error
+            if "quota" in str(exception).lower() or "rate_limit" in str(exception).lower():
+                return True
+        return isinstance(exception, (google_api_exceptions.ServiceUnavailable, google_api_exceptions.DeadlineExceeded))
+
+    def _calculate_retry_delay(self, attempt: int, base_delay: float = 1.0, max_delay: float = 60.0) -> float:
+        """Calculate exponential backoff delay with jitter."""
+        delay = min(base_delay * (2**attempt), max_delay)
+        # Add jitter to prevent thundering herd
+        jitter = random.uniform(0.1, 0.5) * delay
+        return delay + jitter
 
     def get_logs_since(self, function_instance: str, since: datetime) -> list[str]:
         return self._log_filter(function_instance, start=since)

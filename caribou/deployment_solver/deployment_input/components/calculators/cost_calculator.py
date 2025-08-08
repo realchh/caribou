@@ -1,7 +1,9 @@
 import math
-from typing import Optional
+import os
+from typing import Any, Optional
 
-from caribou.common.constants import GLOBAL_SYSTEM_REGION
+from caribou.common.constants import GLOBAL_GCP_SYSTEM_REGION, GLOBAL_SYSTEM_REGION
+from caribou.common.provider import Provider
 from caribou.deployment_solver.deployment_input.components.calculator import InputCalculator
 from caribou.deployment_solver.deployment_input.components.loaders.datacenter_loader import DatacenterLoader
 from caribou.deployment_solver.deployment_input.components.loaders.workflow_loader import WorkflowLoader
@@ -43,7 +45,11 @@ class CostCalculator(InputCalculator):
 
         # We model the virtual start hop cost related to dynamodb read and write
         # as accessing the system region dynamodb table.
-        system_region_name = f"aws:{GLOBAL_SYSTEM_REGION}"
+        default_provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+        if default_provider == Provider.GCP.value:
+            system_region_name = f"{default_provider}:{GLOBAL_GCP_SYSTEM_REGION}"
+        else:
+            system_region_name = f"{default_provider}:{GLOBAL_SYSTEM_REGION}"
 
         # Calculate the dynamodb read/write capacity cost
         total_cost += self._calculate_dynamodb_cost(system_region_name, dynamodb_read_capacity, dynamodb_write_capacity)
@@ -83,7 +89,6 @@ class CostCalculator(InputCalculator):
         total_cost += self._calculate_dynamodb_cost(
             current_region_name, dynamodb_read_capacity, dynamodb_write_capacity
         )
-
         return total_cost
 
     def _calculate_dynamodb_cost(
@@ -124,13 +129,19 @@ class CostCalculator(InputCalculator):
             if not region_name:
                 raise ValueError("Region name cannot be None")
 
+            provider, _ = region_name.split(":")
+
             # Calculate the cost of invocation
             for sns_invocation_size_gb in sns_invocation_sizes:
                 # According to AWS documentation, each 64KB chunk of delivered data is billed as 1 request
                 # https://aws.amazon.com/sns/pricing/
                 # Convert gb to kb and divide by 64 rounded up
-                requests = math.ceil(sns_invocation_size_gb * 1024**2 / 64)
-                total_sns_cost += self._datacenter_loader.get_sns_request_cost(region_name) * requests
+                request_cost = self._datacenter_loader.get_sns_request_cost(region_name)
+                if provider == Provider.GCP.value:
+                    total_sns_cost = request_cost * sns_invocation_size_gb / 1024
+                else:
+                    requests = math.ceil(sns_invocation_size_gb * 1024**2 / 64)
+                    total_sns_cost += request_cost * requests
 
         return total_sns_cost
 
@@ -165,16 +176,25 @@ class CostCalculator(InputCalculator):
         # Get the number of vCPUs and Memory of the instance
         provider, _ = region_name.split(":")
         memory_mb: float = self._workflow_loader.get_memory(instance_name, provider)
+        vcpu: float = self._workflow_loader.get_vcpu(instance_name, provider)
 
         ## datacenter loader data
         architecture: str = self._workflow_loader.get_architecture(instance_name, provider)
-        compute_cost: float = self._datacenter_loader.get_compute_cost(region_name, architecture)
+        compute_cost: Any = self._datacenter_loader.get_compute_cost(region_name, architecture)
         invocation_cost: float = self._datacenter_loader.get_invocation_cost(region_name, architecture)
 
-        # Compute cost in USD / GB-seconds
-        # Memory in MB, execution_time in seconds, vcpu in vcpu
-        memory_gb: float = memory_mb / 1024
-        cost_from_compute_s: float = compute_cost * memory_gb  # IN USD / s
+        if provider == Provider.GCP.value:
+            # GCP cost in USD / GB-seconds + vCPU-seconds.
+            # Memory in MB, execution_time in seconds, vcpu in vcpu
+            memory_gb: float = memory_mb / 1024
+            memory_cost: float = compute_cost.get("memory_gb_s", 0)
+            vcpu_cost: float = compute_cost.get("cpu_s", 0)
+            cost_from_compute_s: float = memory_cost * memory_gb + vcpu_cost * vcpu  # IN USD / s
+        else:
+            # Compute cost in USD / GB-seconds
+            # Memory in MB, execution_time in seconds, vcpu in vcpu
+            memory_gb = memory_mb / 1024
+            cost_from_compute_s = compute_cost * memory_gb  # IN USD / s
 
         # Add the conversion ratio to the cache
         self._execution_conversion_ratio_cache[key] = (cost_from_compute_s, invocation_cost)

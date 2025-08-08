@@ -49,11 +49,8 @@ class CarbonRetriever(DataRetriever):  # pylint: disable=too-many-instance-attri
 
         self._carbon_intensity_cache: dict[tuple[float, float], float] = {}
 
-        self._this_file_dir = Path(__file__).resolve().parent
-        self._project_root = self._this_file_dir.parent.parent.parent
-        self._finder_data_path = self._project_root / "data_collector" / "utils" / "ec_maps_zone_finder"
-        self._finder_data_csv_path = self._finder_data_path / "data.csv"
-        self._finder_data_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        self._finder_data_path = Path("/tmp/ec_maps_zone_finder")
+        self._finder_data_path.mkdir(parents=True, exist_ok=True)
 
     def retrieve_carbon_region_data(self) -> dict[str, dict[str, Any]]:
         result_dict: dict[str, dict[str, Any]] = {}
@@ -363,4 +360,5 @@ class CarbonRetriever(DataRetriever):  # pylint: disable=too-many-instance-attri
                 {"datetime": datetime_str, "carbonIntensity": carbon_intensity_str}
             )
 
+        os.remove(my_file)
         return raw_carbon_intensity_history_list
