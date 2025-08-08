@@ -16,6 +16,7 @@ from caribou.common.constants import (
     DEPLOYMENT_MANAGER_WORKFLOW_INFO_TABLE,
     DISTANCE_FOR_POTENTIAL_MIGRATION,
     FORGETTING_TIME_DAYS,
+    GLOBAL_GCP_SYSTEM_REGION,
     GLOBAL_SYSTEM_REGION,
     GLOBAL_TIME_ZONE,
     MIGRATION_COST_ESTIMATE,
@@ -26,6 +27,7 @@ from caribou.common.constants import (
     TIME_FORMAT_DAYS,
     WORKFLOW_INSTANCE_TABLE,
 )
+from caribou.common.provider import Provider
 from caribou.data_collector.components.workflow.workflow_collector import WorkflowCollector
 from caribou.deployment_solver.deployment_algorithms.coarse_grained_deployment_algorithm import (
     CoarseGrainedDeploymentAlgorithm,
@@ -348,8 +350,13 @@ class DeploymentManager(Monitor):
         )
 
     def _get_carbon_intensity_system(self) -> float:
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+        if provider == Provider.GCP.value:
+            region = f"gcp:{GLOBAL_GCP_SYSTEM_REGION}"
+        else:
+            region = f"aws:{GLOBAL_SYSTEM_REGION}"
         region_carbon_raw, _ = self._endpoints.get_deployment_manager_client().get_value_from_table(
-            CARBON_REGION_TABLE, f"aws:{GLOBAL_SYSTEM_REGION}"
+            CARBON_REGION_TABLE, region
         )
 
         if region_carbon_raw is None:

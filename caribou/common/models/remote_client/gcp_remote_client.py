@@ -608,13 +608,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         container.env = [run_v2.EnvVar({"name": k, "value": v}) for k, v in env.items()]
         container.resources = run_v2.ResourceRequirements(limits={"cpu": str(cpu), "memory": f"{memory_mib}Mi"})
 
+        max_instances = self._calculate_safe_max_instances(memory_mib)
+
         template = run_v2.RevisionTemplate(
             {
                 "max_instance_request_concurrency": max_concurrency,
                 "containers": [container],
                 "timeout": f"{timeout_s}s",
                 "service_account": service_account_email,
-                "scaling": run_v2.RevisionScaling({"min_instance_count": 0, "max_instance_count": 100}),
+                "scaling": run_v2.RevisionScaling({"min_instance_count": 0, "max_instance_count": max_instances}),
             }
         )
 
@@ -631,6 +633,30 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         op.result()
         return client.get_service(name=full_name).uri
+
+    def _calculate_safe_max_instances(self, memory_mib: int) -> int:
+        """
+        Calculate safe max instances based on memory allocation and regional quota.
+
+        Args:
+            memory_mib: Memory in MiB per instance
+
+        Returns:
+            Safe maximum number of instances
+        """
+        # Convert MiB to bytes
+        memory_bytes_per_instance = memory_mib * 1024 * 1024
+
+        # GCP default regional memory quota is ~400GB (429,496,729,600 bytes)
+        # Use 90% of quota to leave safety margin
+        regional_quota_bytes = 429_496_729_600 * 0.9
+
+        # Calculate max instances based on quota
+        max_instances_by_quota = int(regional_quota_bytes / memory_bytes_per_instance)
+
+        max_instances = max(1, min(100, max_instances_by_quota))
+
+        return max_instances
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
         workflow_instance_id = "-".join(function_name.split("-")[0:5])

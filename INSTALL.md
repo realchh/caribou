@@ -176,6 +176,50 @@ gcloud services enable \
   logging.googleapis.com
 ```
 
+## Gcloud authentication for the framework
+`gcloud init` only sets up the authentication for the command line. For the python scripts and framework, you need to
+use a different method to log in and generate a credential file required to run our framework.
+```
+# Create the service account
+gcloud iam service-accounts create caribou-framework-sa \
+    --description="Service account for Caribou framework operations" \
+    --display-name="Caribou Framework Service Account"
+
+# Grant all necessary roles
+ROLES=(
+    "roles/run.admin"
+    "roles/run.invoker"
+    "roles/artifactregistry.admin"
+    "roles/storage.admin"
+    "roles/datastore.owner"
+    "roles/firebase.admin"
+    "roles/pubsub.admin"
+    "roles/cloudscheduler.admin"
+    "roles/iam.serviceAccountAdmin"
+    "roles/resourcemanager.projectIamAdmin"
+    "roles/iam.serviceAccountTokenCreator"
+    "roles/logging.viewer"
+    "roles/monitoring.viewer"
+    "roles/browser"
+    "roles/cloudbuild.builds.builder"
+)
+
+for role in "${ROLES[@]}"; do
+    gcloud projects add-iam-policy-binding caribou-460422 \
+        --member="serviceAccount:caribou-framework-sa@caribou-460422.iam.gserviceaccount.com" \
+        --role="$role"
+done
+```
+After the script has finished running, you can download the service account key to your machine to then be used for authenticating to google cloud services. Keep this key in a secure place, treat it like a password.
+```
+# Download the service account key
+gcloud iam service-accounts keys create ~/caribou-framework-sa-key.json \
+    --iam-account=caribou-framework-sa@caribou-460422.iam.gserviceaccount.com
+
+# Set environment variable
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/caribou-framework-sa-key.json"
+```
+
 ## Default key-value store database
 For GCP, we are using firestore to store our key-value pairs. Please create a default firestore database.
 
@@ -190,15 +234,6 @@ To do this step, you could also use the following command. Change the region her
 ```
 gcloud firestore databases create --location=us-east1
 ```
-
-## Gcloud authentication for the framework
-`gcloud init` only sets up the authentication for the command line. For the python scripts and framework, you need to
-use a different method to log in and generate a credential file required to run our framework.
-```
-gcloud auth application-default login
-```
-After running this command, a link to log in to your account will appear. Inside your web browser, log in to your desired
-account and copy the generated key to the space provided in the gcloud CLI.
 
 ## Configuring Caribou to use GCP
 Set the environment variable `CARIBOU_DEFAULT_PROVIDER` to GCP.
