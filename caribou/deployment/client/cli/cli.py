@@ -6,6 +6,7 @@ from cron_descriptor import Options, get_description
 
 # Caribou imports
 from caribou.common.models.endpoints import Endpoints
+from caribou.common.provider import Provider
 from caribou.common.setup.setup_tables import main as setup_tables_func
 from caribou.common.teardown.teardown_tables import main as teardown_tables_func
 from caribou.data_collector.components.carbon.carbon_collector import CarbonCollector
