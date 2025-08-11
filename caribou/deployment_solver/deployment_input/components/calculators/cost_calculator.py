@@ -187,8 +187,8 @@ class CostCalculator(InputCalculator):
             # GCP cost in USD / GB-seconds + vCPU-seconds.
             # Memory in MB, execution_time in seconds, vcpu in vcpu
             memory_gb: float = memory_mb / 1024
-            memory_cost: float = compute_cost.get("memory_gb_s", 0)
-            vcpu_cost: float = compute_cost.get("cpu_s", 0)
+            memory_cost: float = compute_cost.get("memory_gb_s")
+            vcpu_cost: float = compute_cost.get("cpu_s")
             cost_from_compute_s: float = memory_cost * memory_gb + vcpu_cost * vcpu  # IN USD / s
         else:
             # Compute cost in USD / GB-seconds

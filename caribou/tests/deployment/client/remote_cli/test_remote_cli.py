@@ -223,7 +223,6 @@ class TestRemoteCLI(unittest.TestCase):
         ):
             deploy_remote_framework("/fake/project/dir", 300, 1024, 1024)
 
-        mock_client.remove_role.assert_called_once_with("caribou-deployment-policy")
         mock_client.create_role.assert_called_once()
         mock_client.deploy_remote_cli.assert_called_once()
 

@@ -202,11 +202,12 @@ ROLES=(
     "roles/monitoring.viewer"
     "roles/browser"
     "roles/cloudbuild.builds.builder"
+    "roles/iam.serviceAccountUser"
 )
 
 for role in "${ROLES[@]}"; do
-    gcloud projects add-iam-policy-binding caribou-460422 \
-        --member="serviceAccount:caribou-framework-sa@caribou-460422.iam.gserviceaccount.com" \
+    gcloud projects add-iam-policy-binding YOUR-PROJECT-ID \
+        --member="serviceAccount:caribou-framework-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com" \
         --role="$role"
 done
 ```
@@ -214,7 +215,7 @@ After the script has finished running, you can download the service account key 
 ```
 # Download the service account key
 gcloud iam service-accounts keys create ~/caribou-framework-sa-key.json \
-    --iam-account=caribou-framework-sa@caribou-460422.iam.gserviceaccount.com
+    --iam-account=caribou-framework-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com
 
 # Set environment variable
 export GOOGLE_APPLICATION_CREDENTIALS="$HOME/caribou-framework-sa-key.json"

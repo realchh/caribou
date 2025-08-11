@@ -10,10 +10,6 @@ from datetime import UTC, datetime, timedelta
 from time import sleep
 from typing import Any, Optional
 
-import google.auth
-import google.auth.transport.requests
-import google.oauth2
-import requests
 from google.api_core import exceptions as google_api_exceptions
 from google.api_core.client_options import ClientOptions
 from google.auth import default as google_auth_default
@@ -45,7 +41,6 @@ from caribou.common.constants import (
     GCP_LOG_SYNCER_DEFAULT_DELAY,
     GLOBAL_GCP_SYSTEM_REGION,
     REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME,
-    REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME,
     SYNC_MESSAGES_TABLE,
     SYNC_PREDECESSOR_COUNTER_TABLE,
     SYNC_TABLE_TTL,
@@ -212,12 +207,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         sa_email = f"{name}@{self._project_id}.iam.gserviceaccount.com"
         full_account_name = f"projects/{self._project_id}/serviceAccounts/{sa_email}"
         try:
+            service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
+            return service_account_object.email
+        except google_api_exceptions.NotFound:
             service_account_object = self._iam_admin_client.create_service_account(
                 name=f"projects/{self._project_id}",
                 account_id=name,
             )
-        except google_api_exceptions.AlreadyExists:
-            service_account_object = self._iam_admin_client.get_service_account(name=full_account_name)
+            sleep(2)
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Failed to create service account: {e}") from e
 
@@ -767,7 +764,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         CMD ["functions-framework", \
         "--source", "{source_file}", \
         "--target", "{target_function}", \
-        "--signature-type", "event"]
+        "--signature-type", "cloudevent"]
         """
 
     def _build_docker_image(self, context_path: str, image_name: str) -> None:
@@ -1630,7 +1627,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         CMD ["functions-framework", \
         "--source", "{source_file}", \
         "--target", "{target_function}", \
-        "--signature-type", "http"]
+        "--signature-type", "cloudevent"]
         """
 
     def _create_framework_cloud_run_function(
@@ -1666,6 +1663,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             max_concurrency=80,
         )
 
+        topic_path = self.create_pubsub_topic(f"{function_name}-topic")
+        subscription_name = f"{function_name}-subscription"
+        self.create_pubsub_subscription(topic_path, subscription_name, url, service_account_email, timeout)
+
+        self.add_pubsub_permission_for_cloud_run(function_name, service_account_email)
+
         print(f"Caribou Lambda Framework remote cli function {function_name}" f" created successfully, with url: {url}")
         return url
 
@@ -1700,34 +1703,21 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         Creates a Cloud Scheduler job that publishes a message to a Pub/Sub topic.
         This topic is assumed to be the one that triggers the target Cloud Run service.
         """
-        # Get the remote CLI cloud run service URI
+        # Get the remote CLI pub/sub topic
+        client = self._pubsub_publisher_client
+        topic_name = self.get_remote_cli_topic_name()
+        topic_path = client.topic_path(self._project_id, topic_name)
         try:
-            service_path = self._run_client.service_path(self._project_id, self._region, lambda_function_name)
-            service = self._run_client.get_service(name=service_path)
-            target_uri = service.uri
+            client.get_topic(topic=topic_path)
         except google_api_exceptions.NotFound as e:
-            raise RuntimeError(f"Cloud Run service {lambda_function_name} for timer rule not found") from e
-
-        service_account_id = REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME
-        service_account_email = f"{service_account_id}@{self._project_id}.iam.gserviceaccount.com"
+            raise RuntimeError(f"Pub/sub topic {topic_name} for timer rule not found") from e
 
         job_path = self._scheduling_client.job_path(self._project_id, self._region, rule_name)
 
-        oidc_token = scheduler_v1.types.OidcToken(
-            service_account_email=service_account_email,
-            audience=target_uri,
-        )
-
-        http_target = scheduler_v1.types.HttpTarget(
-            uri=target_uri,
-            http_method=scheduler_v1.types.HttpMethod.POST,
-            headers={"Content-Type": "application/json"},
-            body=event_payload.encode("utf-8"),
-            oidc_token=oidc_token,
-        )
+        pubsub_target = scheduler_v1.types.PubsubTarget(topic_name=topic_path, data=event_payload.encode("utf-8"))
 
         job = scheduler_v1.Job(
-            {"name": job_path, "schedule": schedule_expression, "time_zone": "Etc/UTC", "http_target": http_target}
+            {"name": job_path, "schedule": schedule_expression, "time_zone": "Etc/UTC", "pubsub_target": pubsub_target}
         )
 
         try:
@@ -1738,6 +1728,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             self._scheduling_client.update_job(job=job)
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Error creating timer rule {rule_name}: {e}") from e
+
+    def get_remote_cli_topic_name(self) -> str:
+        """Get the topic name for remote CLI commands"""
+        remote_cli_name = REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME
+        return f"{remote_cli_name}-topic"
 
     def invoke_remote_framework_internal_action(self, action_type: str, action_events: dict[str, Any]) -> None:
         payload = {
@@ -1752,32 +1747,25 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self, payload: dict[str, Any], invocation_type: str = "RequestResponse"
     ) -> None:
         """
-        Invokes the remote framework CLI (a Cloud Run service) via an authenticated HTTP request.
+        Invokes the remote framework CLI (a Cloud Run service) via a pub/sub request.
         """
         # Get the remote cli url
-        remote_cli_name = os.environ.get("REMOTE_CARIBOU_CLI_FUNCTION_NAME", REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME)
-        service_path = self._run_client.service_path(self._project_id, self._region, remote_cli_name)
+        topic_name = self.get_remote_cli_topic_name()
+        topic_path = self._pubsub_publisher_client.topic_path(self._project_id, topic_name)
+
         try:
-            service = self._run_client.get_service(name=service_path)
-            target_url = service.uri
+            self._pubsub_publisher_client.get_topic(topic=topic_path)
+
+            message_data = json.dumps(payload).encode("utf-8")
+            result = self._pubsub_publisher_client.publish(topic_path, message_data)
+
+            message_id = result.result()
+            logger.info("Successfully invoked remote CLI. Message id: %s", message_id)
 
         except google_api_exceptions.NotFound as e:
-            raise RuntimeError(f"Remote CLI service '{remote_cli_name}' not found: e") from e
-
-        auth_req = google.auth.transport.requests.Request()
-        credentials = self._credentials
-        credentials.refresh(auth_req)
-
-        identity_token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
-
-        headers = {"Authorization": f"Bearer {identity_token}", "Content-Type": "application/json"}
-
-        try:
-            response = requests.post(target_url, headers=headers, json=payload, timeout=300)
-            response.raise_for_status()
-            logger.info("Successfully invoked remote CLI. Status: %d", response.status_code)
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Failed to invoke remote CLI at {target_url}: {e}") from e
+            raise RuntimeError(f"Topic {topic_name} not found: e") from e
+        except google_api_exceptions.GoogleAPICallError as e:
+            logger.error("Pub/Sub invocation failed: %s", e)
 
     def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         # This method should not be reached, but it is here to satisfy the interface.

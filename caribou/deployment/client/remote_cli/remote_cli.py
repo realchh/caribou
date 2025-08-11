@@ -166,13 +166,6 @@ def deploy_gcp_remote_framework(
         iam_policies_content = file.read()
         iam_policies_content = json.dumps(json.loads(iam_policies_content)["gcp"])
 
-    # Delete role if exists
-    if gcp_remote_client.resource_exists(
-        Resource(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME, "service_account")
-    ):  # For service_account
-        print(f"Deleting service account {REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME}")
-        gcp_remote_client.remove_role(REMOTE_CARIBOU_CLI_GCP_IAM_POLICY_NAME)
-
     # Create a role
     service_account_email = gcp_remote_client.get_service_account("caribou-deployment-policy")
     sleep(3)

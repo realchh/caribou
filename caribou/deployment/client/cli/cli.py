@@ -273,10 +273,18 @@ def deploy_remote_cli(
         ## Default 1769 == 1 full vCPU (https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html)
         memory_mb: int = _validate_parameter(memory, 1769, 128, 10240, "Memory", "MB")
 
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+
         # Timeout
-        ## Default 900 == 15 minutes Maximum timeout (15 minutes)
-        ## (https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html)
-        timeout_s: int = _validate_parameter(timeout, 900, 1, 900, "Timeout", "seconds")
+        if provider == Provider.GCP.value:
+            ## GCP max timeout == 60 minutes, recommended amount = 15 minutes
+            max_timeout_s = 60 * 60
+        else:
+            ## Default 900 == 15 minutes Maximum timeout (15 minutes)
+            ## (https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html)
+            max_timeout_s = 15 * 60
+
+        timeout_s: int = _validate_parameter(timeout, max_timeout_s, 1, max_timeout_s, "Timeout", "seconds")
 
         # Ephemeral Storage
         ## Default 5120 == 5 GB (Should be enough for most use cases)

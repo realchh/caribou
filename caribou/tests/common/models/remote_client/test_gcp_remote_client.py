@@ -113,6 +113,7 @@ class TestGCPRemoteClient(unittest.TestCase):
 
         mock_sa = MagicMock()
         mock_sa.email = expected_email
+        self.gcp_client._iam_admin_client.get_service_account.side_effect = google_api_exceptions.NotFound("Not found")
         self.gcp_client._iam_admin_client.create_service_account.return_value = mock_sa
 
         result = self.gcp_client.get_service_account(service_account_name)
@@ -464,30 +465,35 @@ class TestGCPRemoteClient(unittest.TestCase):
 
     @patch("requests.post")
     @patch("google.oauth2.id_token.fetch_id_token")
-    def test_invoke_remote_framework_with_payload(self, mock_fetch_token, mock_post):
+    def test_invoke_remote_framework_with_payload_pubsub_success(self, mock_fetch_token, mock_post):
+        """Test successful Pub/Sub invocation (fire-and-forget mode)"""
         payload = {"action": "test", "data": "test_data"}
 
-        # Mock service details
-        mock_service = MagicMock()
-        mock_service.uri = "https://remote-cli.run.app"
-        self.gcp_client._run_client.service_path.return_value = (
-            "projects/test/locations/us-central1/services/remote-cli"
-        )
-        self.gcp_client._run_client.get_service.return_value = mock_service
+        # Mock Pub/Sub publisher
+        mock_future = MagicMock()
+        mock_future.result.return_value = "test-message-id-123"
+        self.gcp_client._pubsub_publisher_client.publish.return_value = mock_future
+        self.gcp_client._pubsub_publisher_client.topic_path.return_value = "projects/test/topics/test-topic"
 
-        # Mock auth
-        mock_fetch_token.return_value = "test-token"
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_post.return_value = mock_response
+        # Mock topic exists
+        mock_topic = MagicMock()
+        self.gcp_client._pubsub_publisher_client.get_topic.return_value = mock_topic
 
+        # Call the method
         self.gcp_client.invoke_remote_framework_with_payload(payload)
 
-        mock_post.assert_called_once()
-        args, kwargs = mock_post.call_args
-        self.assertEqual(args[0], "https://remote-cli.run.app")
-        self.assertEqual(kwargs["json"], payload)
-        self.assertIn("Authorization", kwargs["headers"])
+        # Verify Pub/Sub was used (not HTTP)
+        self.gcp_client._pubsub_publisher_client.publish.assert_called_once()
+
+        # Verify the message was correctly encoded
+        call_args = self.gcp_client._pubsub_publisher_client.publish.call_args
+        topic_path, message_data = call_args[0]
+
+        self.assertEqual(topic_path, "projects/test/topics/test-topic")
+        self.assertEqual(json.loads(message_data.decode("utf-8")), payload)
+
+        # Verify HTTP was NOT called (fire-and-forget via Pub/Sub)
+        mock_post.assert_not_called()
 
     def test_get_logs_between(self):
         function_instance = "test-function"
@@ -911,18 +917,62 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         self.assertTrue(True)  # Test passes if no exception was raised
 
     def test_create_timer_rule_service_not_found(self):
-        """Test timer rule creation when target service doesn't exist"""
+        """Test timer rule creation when target service doesn't exist - should still work with Pub/Sub"""
         lambda_function_name = "non-existent-function"
         schedule_expression = "0 */6 * * *"
         rule_name = "test-rule"
         event_payload = '{"test": "payload"}'
 
-        self.gcp_client._run_client.get_service.side_effect = google_api_exceptions.NotFound("Service not found")
+        # Mock Pub/Sub topic exists (timer rules use Pub/Sub, not direct service calls)
+        mock_topic = MagicMock()
+        self.gcp_client._pubsub_publisher_client.get_topic.return_value = mock_topic
+        self.gcp_client._pubsub_publisher_client.topic_path.return_value = "projects/test/topics/test-topic"
 
+        # Mock successful scheduler job creation
+        mock_job = MagicMock()
+        mock_job.name = f"projects/test/locations/us-central1/jobs/{rule_name}"
+        self.gcp_client._scheduling_client.create_job.return_value = mock_job
+        self.gcp_client._scheduling_client.job_path.return_value = mock_job.name
+
+        # This should NOT raise an error because timer rules use Pub/Sub, not direct service calls
+        # The timer will create a Pub/Sub target, not an HTTP target to the service
+        self.gcp_client.create_timer_rule(lambda_function_name, schedule_expression, rule_name, event_payload)
+
+        # Verify scheduler job was created with Pub/Sub target
+        self.gcp_client._scheduling_client.create_job.assert_called_once()
+
+        # Verify the job has a pubsub_target (not http_target)
+        call_args = self.gcp_client._scheduling_client.create_job.call_args
+        job_config = call_args[1]["job"]  # keyword argument 'job'
+
+        # Should have pubsub_target, not http_target
+        self.assertTrue(hasattr(job_config, "pubsub_target") or "pubsub_target" in job_config)
+
+    def test_create_timer_rule_scheduler_permission_error(self):
+        """Test timer rule creation with scheduler permission error"""
+        lambda_function_name = "test-function"
+        schedule_expression = "0 */6 * * *"
+        rule_name = "test-rule"
+        event_payload = '{"test": "payload"}'
+
+        # Mock topic exists
+        mock_topic = MagicMock()
+        self.gcp_client._pubsub_publisher_client.get_topic.return_value = mock_topic
+        self.gcp_client._pubsub_publisher_client.topic_path.return_value = "projects/test/topics/test-topic"
+
+        # Mock scheduler permission error
+        self.gcp_client._scheduling_client.create_job.side_effect = google_api_exceptions.PermissionDenied(
+            "Permission denied for Cloud Scheduler"
+        )
+        self.gcp_client._scheduling_client.job_path.return_value = (
+            f"projects/test/locations/us-central1/jobs/{rule_name}"
+        )
+
+        # This should raise a RuntimeError
         with self.assertRaises(RuntimeError) as context:
             self.gcp_client.create_timer_rule(lambda_function_name, schedule_expression, rule_name, event_payload)
 
-        self.assertIn("not found", str(context.exception))
+        self.assertIn("Error creating timer rule", str(context.exception))
 
     def test_remove_timer_rule_not_found(self):
         """Test removing non-existent timer rules"""
@@ -1594,47 +1644,52 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
     @patch("requests.post")
     @patch("google.oauth2.id_token.fetch_id_token")
     def test_invoke_remote_framework_authentication_failure(self, mock_fetch_token, mock_post):
-        """Test remote framework invocation with authentication failure"""
+        """Test remote framework invocation with authentication failure - should succeed via Pub/Sub"""
         payload = {"action": "test"}
 
-        # Mock service details
-        mock_service = MagicMock()
-        mock_service.uri = "https://remote-cli.run.app"
-        self.gcp_client._run_client.service_path.return_value = "service-path"
-        self.gcp_client._run_client.get_service.return_value = mock_service
+        # Mock Pub/Sub success (primary path)
+        mock_future = MagicMock()
+        mock_future.result.return_value = "test-message-id-123"
+        self.gcp_client._pubsub_publisher_client.publish.return_value = mock_future
+        self.gcp_client._pubsub_publisher_client.topic_path.return_value = "projects/test/topics/test-topic"
 
-        # Mock auth failure
+        # Mock topic exists
+        mock_topic = MagicMock()
+        self.gcp_client._pubsub_publisher_client.get_topic.return_value = mock_topic
+
+        # Even if auth would fail, Pub/Sub should succeed
         mock_fetch_token.side_effect = Exception("Auth failed")
 
-        with self.assertRaises(Exception):
-            self.gcp_client.invoke_remote_framework_with_payload(payload)
+        # This should NOT raise an exception because Pub/Sub succeeds
+        self.gcp_client.invoke_remote_framework_with_payload(payload)
+
+        # Verify Pub/Sub was used (not HTTP)
+        self.gcp_client._pubsub_publisher_client.publish.assert_called_once()
+        mock_post.assert_not_called()
 
     @patch("requests.post")
     @patch("google.oauth2.id_token.fetch_id_token")
-    def test_invoke_remote_framework_http_error(self, mock_fetch_token, mock_post):
-        """Test remote framework invocation with HTTP error"""
+    def test_invoke_remote_framework_pubsub_failure_auth_failure(self, mock_fetch_token, mock_post):
         payload = {"action": "test"}
 
-        # Mock service details
+        # Mock Pub/Sub failure
+        self.gcp_client._pubsub_publisher_client.publish.side_effect = Exception("Pub/Sub failed")
+        self.gcp_client._pubsub_publisher_client.topic_path.return_value = "projects/test/topics/test-topic"
+        self.gcp_client._pubsub_publisher_client.get_topic.side_effect = google_api_exceptions.NotFound(
+            "Topic not found"
+        )
+
         mock_service = MagicMock()
         mock_service.uri = "https://remote-cli.run.app"
         self.gcp_client._run_client.service_path.return_value = "service-path"
         self.gcp_client._run_client.get_service.return_value = mock_service
 
-        # Mock successful auth but HTTP error
-        mock_fetch_token.return_value = "test-token"
-        mock_response = MagicMock()
-
-        # Use requests.exceptions.RequestException instead of generic Exception
-        import requests
-
-        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 500")
-        mock_post.return_value = mock_response
+        mock_fetch_token.side_effect = Exception("Auth failed")
 
         with self.assertRaises(RuntimeError) as context:
             self.gcp_client.invoke_remote_framework_with_payload(payload)
 
-        self.assertIn("Failed to invoke remote CLI", str(context.exception))
+        self.assertIn("Topic caribou-cli-topic not found", str(context.exception))
 
     # =====================================
     # FRAMEWORK DEPLOYMENT TESTS

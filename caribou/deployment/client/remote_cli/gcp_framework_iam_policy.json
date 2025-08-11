@@ -4,6 +4,7 @@
       "roles/run.admin",
       "roles/artifactregistry.admin",
       "roles/iam.serviceAccountAdmin",
+      "roles/iam.serviceAccountUser",
       "roles/resourcemanager.projectIamAdmin",
       "roles/pubsub.admin",
       "roles/cloudscheduler.admin",
@@ -11,7 +12,9 @@
       "roles/storage.objectAdmin",
       "roles/logging.viewer",
       "roles/monitoring.viewer",
-      "roles/run.invoker"
+      "roles/run.invoker",
+      "roles/datastore.owner",
+      "roles/firebase.admin"
     ]
   }
 }
