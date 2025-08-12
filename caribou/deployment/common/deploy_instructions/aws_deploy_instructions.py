@@ -106,7 +106,11 @@ class AWSDeployInstructions(DeployInstructions):
         )
 
     def _get_subscribe_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str, subscription_varname: str
+        self,
+        messaging_topic_identifier_varname: str,
+        function_varname: str,
+        subscription_varname: str,
+        iam_role_varname: str,
     ) -> Instruction:
         return APICall(
             name="subscribe_sns_topic",
@@ -119,7 +123,7 @@ class AWSDeployInstructions(DeployInstructions):
         )
 
     def _add_function_permission_for_messaging_topic_instruction(
-        self, messaging_topic_identifier_varname: str, function_varname: str
+        self, messaging_topic_identifier_varname: str, function_varname: str, iam_role_varname: str, cloud_run_name: str
     ) -> Instruction:
         return APICall(
             name="add_lambda_permission_for_sns_topic",

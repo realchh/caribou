@@ -672,6 +672,7 @@ class TestAWSRemoteClient(unittest.TestCase):
         result = client._generate_dockerfile("python", "handler.handler", [])
         expected_result = """
         FROM public.ecr.aws/lambda/python:
+        ENV CARIBOU_DEFAULT_PROVIDER aws
         COPY requirements.txt ./
         RUN curl -O https://lambda-insights-extension.s3-ap-northeast-1.amazonaws.com/amazon_linux/lambda-insights-extension.rpm && rpm -U lambda-insights-extension.rpm && rm -f lambda-insights-extension.rpm
         
@@ -686,6 +687,7 @@ class TestAWSRemoteClient(unittest.TestCase):
         result = client._generate_dockerfile("python", "handler.handler", ["command1", "command2"])
         expected_result = """
         FROM public.ecr.aws/lambda/python:
+        ENV CARIBOU_DEFAULT_PROVIDER aws
         COPY requirements.txt ./
         RUN curl -O https://lambda-insights-extension.s3-ap-northeast-1.amazonaws.com/amazon_linux/lambda-insights-extension.rpm && rpm -U lambda-insights-extension.rpm && rm -f lambda-insights-extension.rpm
         RUN command1 && command2
@@ -1263,7 +1265,7 @@ class TestAWSRemoteClient(unittest.TestCase):
 
         # Check that the error message was logged
         self.assertIn(
-            "Error removing the EventBridge rule test_rule: An error occurred (InternalError)",
+            "Error getting the EventBridge rule test_rule: An error occurred (InternalError)",
             captured_output.getvalue(),
         )
 

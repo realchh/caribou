@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from caribou.common.constants import (
+    BUFFER_GCP_METRICS_GRACE_PERIOD,
     BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD,
     CONDITIONALLY_NOT_INVOKE_TASK_TYPE,
     FORGETTING_NUMBER,
@@ -22,6 +23,7 @@ from caribou.common.constants import (
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
+from caribou.common.provider import Provider
 from caribou.syncers.components.workflow_run_sample import WorkflowRunSample
 
 
@@ -49,6 +51,7 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         self._deployed_regions: dict[str, dict[str, Any]] = {}
         self._load_information(deployment_manager_config_str)
         self._insights_logs: dict[str, Any] = {}
+        self._run_id_request_id_dict: dict[str, str] = {}
 
         self._existing_data: dict[str, Any] = {
             "execution_instance_region": {},
@@ -108,21 +111,138 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         if len(logs) == 0:
             return
 
+        provider = provider_region.get("provider", Provider.AWS.value)
+
         # Lambda insight logs may not available at the same time as the lambda logs
         # so we need to fetch logs from a wider time range
-        lambda_insights_logs = remote_client.get_insights_logs_between(
-            functions_instance,
-            time_from - timedelta(minutes=BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD),
-            time_to + timedelta(minutes=BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD),
-        )
-        self._setup_lambda_insights(lambda_insights_logs)
+        if provider == Provider.GCP.value:
+            self._setup_gcp_insights(logs, remote_client)
 
+            for log in logs:
+                # GCP: caribou logs have a jsonpayload.severity="CARIBOU".
+                # GCP report logs have a logName of "run.googleapis.com%2Frequests"
+                gcp_log = json.loads(log)
+                if gcp_log.get("jsonPayload", {}).get(
+                    "severity", ""
+                ) == "CARIBOU" or "run.googleapis.com%2Frequests" in gcp_log.get("logName", ""):
+                    self._process_log_entry(log, provider_region, time_to)
+
+        else:
+            lambda_insights_logs = remote_client.get_insights_logs_between(
+                functions_instance,
+                time_from - timedelta(minutes=BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD),
+                time_to + timedelta(minutes=BUFFER_LAMBDA_INSIGHTS_GRACE_PERIOD),
+            )
+            self._setup_lambda_insights(lambda_insights_logs)
+
+            for log in logs:
+                # Only process logs associated with our framework
+                # Which are marked with the [CARIBOU] tag
+                # Or are the AWS Lambda report logs (Just the end of the execution)
+                if log.startswith("[CARIBOU]") or log.startswith("REPORT RequestId:"):
+                    self._process_log_entry(log, provider_region, time_to)
+
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
+    def _setup_gcp_insights(self, logs: list[str], remote_client: RemoteClient) -> None:
+        # clear the insight logs
+        self._insights_logs = {}
+
+        # process the insight log
         for log in logs:
-            # Only process logs associated with our framework
-            # Which are marked with the [CARIBOU] tag
-            # Or are the AWS Lambda report logs (Just the end of the execution)
-            if log.startswith("[CARIBOU]") or log.startswith("REPORT RequestId:"):
-                self._process_log_entry(log, provider_region, time_to)
+            log_dict = json.loads(log)
+
+            log_name = log_dict.get("logName", None)
+
+            # filter for main request log
+            if not log_name or "run.googleapis.com%2Frequests" not in log_name:
+                continue
+
+            # filter for field with "trace" as it contains the run ID
+            trace = log_dict.get("trace")
+            if not trace:
+                continue
+
+            request_id = trace.split("/")[-1]
+
+            if request_id not in self._insights_logs:
+                self._insights_logs[request_id] = {}
+
+            payload = log_dict.get("httpRequest", None)
+            if not payload:
+                payload = log_dict.get("protoPayload", None)
+            if not payload:
+                print(f"No httpRequest or protoPayload found in GCP log: {log}")
+                continue
+
+            if payload:
+                status_code = int(payload.get("status", 0))
+                if status_code != 200:
+                    continue
+
+                latency_str = payload.get("latency", "0s")
+                latency = float(latency_str.rstrip("s"))
+                self._insights_logs[request_id]["duration"] = latency
+
+                rx_bytes_str = payload.get("requestSize", "0")
+                rx_bytes = float(rx_bytes_str)
+                self._insights_logs[request_id]["rx_bytes"] = rx_bytes
+
+                tx_bytes_str = payload.get("responseSize", "0")
+                tx_bytes = float(tx_bytes_str)
+                self._insights_logs[request_id]["tx_bytes"] = tx_bytes
+
+                total_network = rx_bytes + tx_bytes
+                self._insights_logs[request_id]["total_network"] = total_network
+
+                startup_latency_str = payload.get("startupLatency", "0s")
+                # A non-zero startup latency indicates a cold start
+                self._insights_logs[request_id]["cold_start"] = float(startup_latency_str.rstrip("s")) > 0
+                self._insights_logs[request_id]["init_duration_s"] = float(startup_latency_str.rstrip("s"))
+
+            resource_labels = log_dict.get("resource", {}).get("labels", {})
+
+            revision_name = resource_labels.get("revision_name", None)
+            timestamp = log_dict.get("timestamp", None)
+
+            if revision_name and timestamp:
+                end_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00")) + timedelta(
+                    minutes=BUFFER_GCP_METRICS_GRACE_PERIOD
+                )
+                start_time = end_time - timedelta(seconds=latency) - timedelta(minutes=BUFFER_GCP_METRICS_GRACE_PERIOD)
+
+                # Fetch CPU Usage Time
+                cpu_total_time = remote_client.query_metric(
+                    revision_name, "run.googleapis.com/container/cpu/usage", start_time, end_time, "ALIGN_PERCENTILE_99"
+                )
+                if cpu_total_time:
+                    self._insights_logs[request_id]["cpu_total_time"] = cpu_total_time
+
+                # Fetch Memory Utilization
+                memory_utilization = remote_client.query_metric(
+                    revision_name,
+                    "run.googleapis.com/container/memory/utilizations",
+                    start_time,
+                    end_time,
+                    "ALIGN_PERCENTILE_99",
+                )
+                if memory_utilization:
+                    self._insights_logs[request_id]["memory_utilization"] = memory_utilization * 100  # to percents
+
+                # Fetch Max Memory Usage
+                used_memory_max = remote_client.query_metric(
+                    revision_name,
+                    "run.googleapis.com/container/memory/usage",
+                    start_time,
+                    end_time,
+                    "ALIGN_PERCENTILE_99",
+                )
+                if used_memory_max:
+                    self._insights_logs[request_id]["used_memory_max"] = used_memory_max / (1024**2)  # to MBs
+
+                if memory_utilization and used_memory_max:
+                    total_memory = used_memory_max / memory_utilization
+                    self._insights_logs[request_id]["total_memory"] = total_memory / (1024**2)  # to MBs
 
     def _setup_lambda_insights(self, logs: list[str]) -> None:
         # Clear the lambda insights logs
@@ -156,27 +276,56 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                             self._insights_logs[request_id] = {}
                         self._insights_logs[request_id][entry] = log_dict[entry]
 
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
     def _process_log_entry(self, log_entry: str, provider_region: dict[str, str], time_to: datetime) -> None:
-        # If this log entry contains an init duration, then this run has incurred a cold start.
-        # We taint the sample with this information.
-        # Those logs starts with "REPORT" and contains "Init Duration"
-        if log_entry.startswith("REPORT"):
-            request_id = self._extract_from_string(log_entry, r"RequestId: (.*?)\t")
-            if request_id is not None:
-                if "Init Duration" in log_entry:
-                    self._tainted_cold_start_samples.add(request_id)
+        provider = provider_region.get("provider", Provider.AWS.value)
 
-                # Add the request id of AWS report to list of completed request IDs
-                # But first check if it is a duplicate (Already encountered)
+        if provider == Provider.GCP.value:
+            log_dict = json.loads(log_entry)
+            log_name = log_dict.get("logName", None)
+            if log_name and "run.googleapis.com%2Frequests" in log_name:
+                trace = log_dict.get("trace", None)
+
+                if trace is None:
+                    return
+
+                request_id = trace.split("/")[-1]
                 if request_id in self._encountered_completed_request_ids:
                     self._encountered_duplicate_completed_request_ids.add(request_id)
 
                 self._encountered_completed_request_ids.add(request_id)
+                return
 
-        # Ensure that the log entry is a valid log entry and has the correct version
-        # Those logs starts with "[CARIBOU]" and contains "LOG_VERSION"
-        if not log_entry.startswith("[CARIBOU]") and f"LOG_VERSION ({LOG_VERSION})" not in log_entry:
-            return
+            payload = log_dict.get("jsonPayload", {})
+            if payload == {} or payload.get("severity") != "CARIBOU":
+                return
+
+            log_entry = payload.get("message", None)
+            if not log_entry or f"LOG_VERSION ({LOG_VERSION})" not in log_entry:
+                return
+
+        else:
+            # If this log entry contains an init duration, then this run has incurred a cold start.
+            # We taint the sample with this information.
+            # Those logs starts with "REPORT" and contains "Init Duration"
+            if log_entry.startswith("REPORT"):
+                request_id = self._extract_from_string(log_entry, r"RequestId: (.*?)\t")
+                if request_id is not None:
+                    if "Init Duration" in log_entry:
+                        self._tainted_cold_start_samples.add(request_id)
+
+                    # Add the request id of AWS report to list of completed request IDs
+                    # But first check if it is a duplicate (Already encountered)
+                    if request_id in self._encountered_completed_request_ids:
+                        self._encountered_duplicate_completed_request_ids.add(request_id)
+
+                    self._encountered_completed_request_ids.add(request_id)
+
+            # Ensure that the log entry is a valid log entry and has the correct version
+            # Those logs starts with "[CARIBOU]" and contains "LOG_VERSION"
+            if not log_entry.startswith("[CARIBOU]") and f"LOG_VERSION ({LOG_VERSION})" not in log_entry:
+                return
 
         # At this point, every log entry should be from our framework
         # And that it should contain the correct log version
@@ -217,8 +366,16 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
         workflow_run_sample.update_log_end_time(log_time_dt)
 
         # Extract the request_id from the log entry
-        parts = log_entry.split("\t")
-        request_id = parts[2]
+        if provider == Provider.GCP.value and log_dict:
+            trace = log_dict.get("trace")
+            if trace is None:
+                request_id = self._run_id_request_id_dict.get(run_id, None)
+            else:
+                request_id = trace.split("/")[-1]
+                self._run_id_request_id_dict[run_id] = request_id
+        else:
+            parts = log_entry.split("\t")
+            request_id = parts[2]
         workflow_run_sample.request_ids.add(request_id)
 
         self._handle_system_log_messages(
@@ -381,7 +538,6 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
             r"RETRIEVED_PLACEMENT_DECISION_FROM_PLATFORM \((.*?)\)",
             "retrieved_placement_decision_from_platform",
         )
-
         # Handle start hop updates
         workflow_run_sample.start_hop_data.retrieved_wpd_at_function = retrieved_placement_decision_from_platform
 

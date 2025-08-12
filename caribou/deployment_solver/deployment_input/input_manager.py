@@ -1,11 +1,13 @@
 import math
+import os
 import random
 import time
 from typing import Any, Optional
 
-from caribou.common.constants import GLOBAL_SYSTEM_REGION, TAIL_LATENCY_THRESHOLD
+from caribou.common.constants import GLOBAL_GCP_SYSTEM_REGION, GLOBAL_SYSTEM_REGION, TAIL_LATENCY_THRESHOLD
 from caribou.common.models.endpoints import Endpoints
 from caribou.common.models.remote_client.remote_client import RemoteClient
+from caribou.common.provider import Provider
 from caribou.deployment_solver.deployment_input.components.calculators.carbon_calculator import CarbonCalculator
 from caribou.deployment_solver.deployment_input.components.calculators.cost_calculator import CostCalculator
 from caribou.deployment_solver.deployment_input.components.calculators.runtime_calculator import RuntimeCalculator
@@ -75,7 +77,11 @@ class InputManager:  # pylint: disable=too-many-instance-attributes
             raise ValueError("Home region of the workflow is not in the requested regions! This should NEVER happen!")
 
         # If the system region is not in the requested regions, add it
-        system_region_name = f"aws:{GLOBAL_SYSTEM_REGION}"
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.GCP.value)
+        if provider == Provider.GCP.value:
+            system_region_name = f"gcp:{GLOBAL_GCP_SYSTEM_REGION}"
+        else:
+            system_region_name = f"aws:{GLOBAL_SYSTEM_REGION}"
         if system_region_name not in requested_regions:
             requested_regions.add(system_region_name)
 
@@ -453,7 +459,12 @@ class InputManager:  # pylint: disable=too-many-instance-attributes
         }
 
     def _get_converted_region_name_dict(self, input_region_index_dict: dict[int, Any]) -> dict[Optional[str], Any]:
-        system_region_full_name: str = f"aws:{GLOBAL_SYSTEM_REGION}"
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+
+        if provider == Provider.GCP.value:
+            system_region_full_name: str = f"gcp:{GLOBAL_GCP_SYSTEM_REGION}"
+        else:
+            system_region_full_name = f"aws:{GLOBAL_SYSTEM_REGION}"
         return {
             (
                 self._region_indexer.index_to_value(region_index)

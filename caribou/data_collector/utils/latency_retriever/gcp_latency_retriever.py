@@ -1,3 +1,5 @@
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -13,6 +15,15 @@ from caribou.data_collector.utils.latency_retriever.latency_retriever import Lat
 
 class GCPLatencyRetriever(LatencyRetriever):
     _percentile_information: dict[str, Any] | None = None
+    _cache_timestamp: float | None = None
+    _cache_ttl: int = 3600 * 12
+    _cache_lock = threading.Lock()
+
+    def _is_cache_valid(self) -> bool:
+        """Check if cache is valid based on TTL."""
+        if GCPLatencyRetriever._cache_timestamp is None or GCPLatencyRetriever._percentile_information is None:
+            return False
+        return (time.time() - GCPLatencyRetriever._cache_timestamp) < self._cache_ttl
 
     def _get_region_from_zone(self, zone_name: str) -> str:
         """Extracts region from a zone name (e.g., 'us-central1-a' -> 'us-central1')."""
@@ -34,6 +45,11 @@ class GCPLatencyRetriever(LatencyRetriever):
             A list of dictionaries, where each dictionary represents
             the aggregated median latency between two regions.
         """
+        # Check cache first
+        with self._cache_lock:
+            if self._is_cache_valid() and GCPLatencyRetriever._percentile_information is not None:
+                return GCPLatencyRetriever._percentile_information
+
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=1)
         client = monitoring_v3.MetricServiceClient()
@@ -48,18 +64,22 @@ class GCPLatencyRetriever(LatencyRetriever):
         interval.start_time = start_time
         interval.end_time = end_time
 
+        aggregation = monitoring_v3.types.Aggregation(
+            alignment_period={"seconds": 1800},
+            per_series_aligner=monitoring_v3.types.Aggregation.Aligner.ALIGN_MEAN,
+        )
+
         results = client.list_time_series(
             request={
                 "name": project_name,
                 "filter": filter_str,
                 "interval": interval,
                 "view": monitoring_v3.types.ListTimeSeriesRequest.TimeSeriesView.FULL,
+                "aggregation": aggregation,
             }
         )
 
-        series_count = 0
         for series in results:
-            series_count += 1
             source_zone = series.resource.labels.get("location", "unknown_zone")
             dest_zone = series.metric.labels.get("remote_zone", "unknown_zone")
 
@@ -86,16 +106,28 @@ class GCPLatencyRetriever(LatencyRetriever):
         for (src_reg, dst_reg), latencies in region_pair_latencies_raw.items():
             if dst_reg not in aggregated_region_latency_dict[src_reg]:
                 aggregated_region_latency_dict[src_reg][dst_reg] = {}
-            aggregated_region_latency_dict[src_reg][dst_reg]["p_50"] = np.median(latencies)
 
-        return dict(aggregated_region_latency_dict)
+            median_latency = np.median(latencies)
+            aggregated_region_latency_dict[src_reg][dst_reg]["p_50"] = median_latency
+            aggregated_region_latency_dict[src_reg][dst_reg]["distribution"] = [median_latency]
+
+        result = dict(aggregated_region_latency_dict)
+
+        with self._cache_lock:
+            GCPLatencyRetriever._percentile_information = result
+            GCPLatencyRetriever._cache_timestamp = time.time()
+
+        return result
 
     def get_latency_distribution(self, region_from: dict[str, Any], region_to: dict[str, Any]) -> list[float]:
-        _, project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        # Retrieve _percentile_information if not already retrieved
-        if not self._percentile_information:
-            # This url returns a table with the latency between all GCP regions
+        if not self._is_cache_valid():
+            _, project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
             self._percentile_information = self._get_latency_information(project_id)
+        else:
+            self._percentile_information = self._percentile_information
+
+        if not self._percentile_information:
+            return [DEFAULT_LATENCY_VALUE]
 
         region_from_code = region_from["code"]
         if region_from["code"] not in self._percentile_information:
@@ -114,6 +146,15 @@ class GCPLatencyRetriever(LatencyRetriever):
             return [DEFAULT_LATENCY_VALUE]
 
         latency_information = self._percentile_information[region_from_code][region_to_code]
+
+        if "distribution" in latency_information:
+            return latency_information["distribution"]
+
+        # Default case for GCP for now: google cloud monitoring only reports median latency
+        # Issue #359
+        if len(latency_information) == 1 and "p_50" in latency_information:
+            median_latency = latency_information["p_50"]
+            return [median_latency]
 
         log_percentiles = np.log(list(latency_information.values()))
 

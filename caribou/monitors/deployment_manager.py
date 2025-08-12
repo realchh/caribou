@@ -16,6 +16,7 @@ from caribou.common.constants import (
     DEPLOYMENT_MANAGER_WORKFLOW_INFO_TABLE,
     DISTANCE_FOR_POTENTIAL_MIGRATION,
     FORGETTING_TIME_DAYS,
+    GLOBAL_GCP_SYSTEM_REGION,
     GLOBAL_SYSTEM_REGION,
     GLOBAL_TIME_ZONE,
     MIGRATION_COST_ESTIMATE,
@@ -26,6 +27,7 @@ from caribou.common.constants import (
     TIME_FORMAT_DAYS,
     WORKFLOW_INSTANCE_TABLE,
 )
+from caribou.common.provider import Provider
 from caribou.data_collector.components.workflow.workflow_collector import WorkflowCollector
 from caribou.deployment_solver.deployment_algorithms.coarse_grained_deployment_algorithm import (
     CoarseGrainedDeploymentAlgorithm,
@@ -144,15 +146,12 @@ class DeploymentManager(Monitor):
         positive_carbon_savings_token = self._calculate_positive_carbon_savings_token(
             workflow_config.home_region, workflow_summary, total_invocation_counts_since_last_solved
         )
-
         carbon_budget_overflow_last_solved = (
             workflow_info["tokens_left"] if (workflow_info and "tokens_left" in workflow_info) else 0
         )
-
         affordable_deployment_algorithm_run = self._calculate_affordable_deployment_algorithm_run(
             len(workflow_config.instances), positive_carbon_savings_token + carbon_budget_overflow_last_solved
         )
-
         if not affordable_deployment_algorithm_run:
             logger.info("Not enough tokens to run the solver")
             carbon_cost = self._get_cost(len(workflow_config.instances))
@@ -173,7 +172,6 @@ class DeploymentManager(Monitor):
             self.run_deployment_algorithm(workflow_id, solve_hours, leftover_tokens)
 
     def run_deployment_algorithm(self, workflow_id: str, solve_hours: list[str], leftover_tokens: int) -> None:
-        logger.info(f"Running deployment algorithm with solve hours: {solve_hours}")
         expiry_delta_seconds = self._calculate_expiry_delta_seconds(leftover_tokens)
         workflow_config = self._get_workflow_config(workflow_id)
         self._run_deployment_algorithm(workflow_config, solve_hours, expiry_delta_seconds)
@@ -235,7 +233,6 @@ class DeploymentManager(Monitor):
     ) -> None:
         deployment_algorithm_class = deployment_algorithm_mapping.get(workflow_config.deployment_algorithm)
         if deployment_algorithm_class:
-            logger.info(f"Running deployment algorithm: {workflow_config.deployment_algorithm}")
             deployment_algorithm: DeploymentAlgorithm = deployment_algorithm_class(workflow_config, expiry_delta_seconds, deployment_metrics_calculator_type=self._deployment_metrics_calculator_type, lambda_timeout=self._deployed_remotely)  # type: ignore
             deployment_algorithm.run(solve_hours)
         else:
@@ -353,8 +350,13 @@ class DeploymentManager(Monitor):
         )
 
     def _get_carbon_intensity_system(self) -> float:
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+        if provider == Provider.GCP.value:
+            region = f"gcp:{GLOBAL_GCP_SYSTEM_REGION}"
+        else:
+            region = f"aws:{GLOBAL_SYSTEM_REGION}"
         region_carbon_raw, _ = self._endpoints.get_deployment_manager_client().get_value_from_table(
-            CARBON_REGION_TABLE, f"aws:{GLOBAL_SYSTEM_REGION}"
+            CARBON_REGION_TABLE, region
         )
 
         if region_carbon_raw is None:

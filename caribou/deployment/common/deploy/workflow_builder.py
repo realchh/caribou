@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Any, Optional
 
 from caribou.common.provider import Provider as ProviderEnum
+from caribou.common.utils import generate_workflow_gcp_function_name, generate_workflow_service_account_id
 from caribou.deployment.client.caribou_workflow import CaribouFunction
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.config.config_schema import Provider
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowBuilder:
+    # pylint: disable=too-many-statements
     def build_workflow(  # pylint: disable=too-many-branches
         self, config: Config, regions: list[dict[str, str]]
     ) -> Workflow:
@@ -35,6 +37,10 @@ class WorkflowBuilder:
         function_name_to_function: dict[str, CaribouFunction] = {}
         entry_point: Optional[CaribouFunction] = None
 
+        gcp_workflow_service_account = generate_workflow_service_account_id(
+            config.workflow_name, config.workflow_version
+        )
+
         for region in regions:
             if config.workflow_name != config.workflow_app.name:
                 raise RuntimeError("Workflow name in config and workflow app must match")
@@ -45,7 +51,10 @@ class WorkflowBuilder:
             # First, we create the functions (the resources that we deploy to the serverless platform)
             for function in config.workflow_app.functions.values():
                 function_deployment_name = self._get_function_name(config, function, region)
-                function_role = self.get_function_role(config, function_deployment_name)
+                if region["provider"] == ProviderEnum.GCP.value:
+                    function_role = self.get_function_role(config, gcp_workflow_service_account)
+                else:
+                    function_role = self.get_function_role(config, function_deployment_name)
                 if function.regions_and_providers and "providers" in function.regions_and_providers:
                     providers = (
                         function.regions_and_providers["providers"]
@@ -98,11 +107,19 @@ class WorkflowBuilder:
 
         # We use a queue to visit all functions in the DAG in a breadth-first manner
         functions_to_visit: queue.Queue = queue.Queue()
-
         index_in_dag = 0
         # We start with the entry point
+        provider_list = self._merge_and_verify_regions_and_providers(entry_point.regions_and_providers, config)[
+            "providers"
+        ]
+        provider = list(provider_list.keys())[0]
+        if provider == ProviderEnum.GCP.value:
+            entry_point_logical_name = entry_point.handler.split(".")[-1]
+        else:
+            entry_point_logical_name = self._get_function_name_without_provider_and_region(entry_point.name)
+
         predecessor_instance = FunctionInstance(
-            name=f"{self._get_function_name_without_provider_and_region(entry_point.name)}:entry_point:{index_in_dag}",
+            name=f"{entry_point_logical_name}:entry_point:{index_in_dag}",
             entry_point=entry_point.entry_point,
             regions_and_providers=self._merge_and_verify_regions_and_providers(
                 entry_point.regions_and_providers, config
@@ -120,12 +137,17 @@ class WorkflowBuilder:
         while not functions_to_visit.empty():
             function_to_visit, predecessor_instance_name, successor_of_predecessor_index = functions_to_visit.get()
             caribou_function: CaribouFunction = function_name_to_function[function_to_visit]
+
+            if provider == ProviderEnum.GCP.value:
+                logical_name = caribou_function.handler.split(".")[-1]
+            else:
+                logical_name = self._get_function_name_without_provider_and_region(caribou_function.name)
             predecessor_instance_name_for_instance = predecessor_instance_name.split(":", maxsplit=1)[0]
             predecessor_index = predecessor_instance_name.split(":")[-1]
             function_instance_name = (
-                f"{self._get_function_name_without_provider_and_region(caribou_function.name)}:{predecessor_instance_name_for_instance}_{predecessor_index}_{successor_of_predecessor_index}:{index_in_dag}"  # pylint: disable=line-too-long
+                f"{logical_name}:{predecessor_instance_name_for_instance}_{predecessor_index}_{successor_of_predecessor_index}:{index_in_dag}"  # pylint: disable=line-too-long
                 if not caribou_function.is_waiting_for_predecessors()
-                else f"{self._get_function_name_without_provider_and_region(caribou_function.name)}:sync:"  # pylint: disable=line-too-long
+                else f"{logical_name}:sync:"  # pylint: disable=line-too-long
             )
 
             index_in_dag += 1
@@ -217,9 +239,12 @@ class WorkflowBuilder:
         # This is used to uniquely identify a function with respect to a workflow,
         # its version, the provider and the region
         # Note: If this is altered, also alter verify_name_and_version() in workflow.py
-        name = (
-            f"{config.workflow_name}-{config.workflow_version}-{function.name}_{region['provider']}-{region['region']}"
-        )
+        if region["provider"] == ProviderEnum.GCP.value:
+            name = generate_workflow_gcp_function_name(
+                config.workflow_name, config.workflow_version, function.name, region
+            )
+        else:
+            name = f"{config.workflow_name}-{config.workflow_version}-{function.name}_{region['provider']}-{region['region']}"  # pylint: disable=line-too-long
         return name.replace(".", "_")
 
     def _get_function_name_without_provider_and_region(self, function_name: str) -> str:
@@ -238,6 +263,7 @@ class WorkflowBuilder:
         resources: list[Function] = []
 
         function_name_to_description_to_update_functions = defaultdict(list)
+        print(f"rebuilding workflow for {config.workflow_name}-{config.workflow_version}")
 
         for function_name, deployment_region in function_to_deployment_region.items():
             if function_name in deployed_regions:
@@ -256,13 +282,23 @@ class WorkflowBuilder:
                     function_name_without_provider_and_region
                 ]:
                     # This is a function that was already deployed and we are adding a new region to it
+                    print(f"adding region {deployment_region['region']} to {function_name}")
+                    function_role: IAMRole
+                    if deployment_region["provider"] == ProviderEnum.GCP.value:
+                        gcp_workflow_service_account = generate_workflow_service_account_id(
+                            config.workflow_name, config.workflow_version
+                        )
+                        function_role = IAMRole(function["role"]["policy_file"], gcp_workflow_service_account)
+                    else:
+                        function_role = IAMRole(function["role"]["policy_file"], f"{function_name}-role")
+
                     resources.append(
                         Function(
                             name=function_name,
                             environment_variables=function["environment_variables"],
                             runtime=function["runtime"],
                             handler=function["handler"],
-                            role=IAMRole(function["role"]["policy_file"], f"{function_name}-role"),
+                            role=function_role,
                             deployment_package=DeploymentPackage(),
                             deploy_region=deployment_region,
                             entry_point=function["entry_point"],

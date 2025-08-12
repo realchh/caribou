@@ -5,9 +5,9 @@ from typing import Any
 
 from caribou.data_collector.utils.ec_maps_zone_finder import turf
 
-MAX_NEAREST_ZONE_DISTANCE_KM = 10.0
-
 GEO_GENERATED_FILE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "geo.generated.json"))
+MAX_NEAREST_ZONE_DISTANCE_KM = 50  # Maximum distance in km to consider a zone as "nearest" for reverse geocoding,
+# used to allow for some leeway in case the coordinates are just outside the coastline.
 
 
 class GeoFeatureLoader:

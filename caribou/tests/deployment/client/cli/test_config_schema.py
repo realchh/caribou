@@ -18,11 +18,31 @@ from caribou.deployment.common.config.config_schema import (
 
 
 class TestConfigSchema(unittest.TestCase):
-    def test_config_conforms_to_schema(self):
+    def test_aws_config_conforms_to_schema(self):
         current_dir = Path(__file__).parent.parent.parent.parent.parent
         config_file = os.path.join(
             current_dir,
-            "deployment/client/cli/template/.caribou/config.yml",
+            "deployment/client/cli/templates/aws_template/.caribou/config.yml",
+        )
+
+        with open(config_file, "r") as f:
+            config_file = f.read()
+
+        if not config_file:
+            self.assertFalse(True)
+
+        config_dict = yaml.safe_load(config_file)
+
+        try:
+            ConfigSchema(**config_dict)
+        except ValidationError as e:
+            self.assertFalse(True, e)
+
+    def test_gcp_config_conforms_to_schema(self):
+        current_dir = Path(__file__).parent.parent.parent.parent.parent
+        config_file = os.path.join(
+            current_dir,
+            "deployment/client/cli/templates/gcp_template/.caribou/config.yml",
         )
 
         with open(config_file, "r") as f:
@@ -52,7 +72,39 @@ class TestConfigSchema(unittest.TestCase):
         RegionAndProviders(providers={"provider1": Provider(config={"memory": 512, "timeout": 10})})
 
     def test_validate_config_gcp_valid_config(self):
-        RegionAndProviders(providers={"gcp": Provider(config={})})
+        RegionAndProviders(
+            providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 1.0, "concurrency": 10})}
+        )
+
+    def test_validate_config_gcp_missing_timeout(self):
+        with pytest.raises(
+            ValueError, match="The 'config' dictionary must contain 'timeout' key with an integer value"
+        ):
+            RegionAndProviders(providers={"gcp": Provider(config={"memory": 512, "vcpu": 1.0})})
+
+    def test_validate_config_gcp_missing_memory(self):
+        with pytest.raises(ValueError, match="The 'config' dictionary must contain 'memory' key with an integer value"):
+            RegionAndProviders(providers={"gcp": Provider(config={"timeout": 300, "vcpu": 1.0})})
+
+    def test_validate_config_gcp_missing_vcpu(self):
+        with pytest.raises(ValueError, match="The 'config' dictionary must contain 'vcpu' key with a float value"):
+            RegionAndProviders(providers={"gcp": Provider(config={"timeout": 300, "memory": 512})})
+
+    def test_validate_config_gcp_invalid_vcpu_lower(self):
+        with pytest.raises(
+            ValueError, match="The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
+        ):
+            RegionAndProviders(
+                providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 0.01, "concurrency": 10})}
+            )
+
+    def test_validate_config_gcp_invalid_vcpu_not_in_list(self):
+        with pytest.raises(
+            ValueError, match="The 'vcpu' value must be between 0.08 and 1.0 inclusive, or one of: 2.0, 4.0, 6.0, 8.0"
+        ):
+            RegionAndProviders(
+                providers={"gcp": Provider(config={"memory": 1024, "timeout": 10, "vcpu": 3.0, "concurrency": 10})}
+            )
 
     def test_constraint_invalid_type(self):
         with pytest.raises(ValueError, match="Constraint type invalid is not supported"):

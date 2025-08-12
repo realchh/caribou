@@ -252,6 +252,8 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         deployed_image_uri = self._get_deployed_image_uri(function_name)
@@ -442,6 +444,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return f"""
         FROM public.ecr.aws/lambda/{runtime.replace("python", "python:")}
+        ENV CARIBOU_DEFAULT_PROVIDER aws
         COPY requirements.txt ./
         {lambda_insight_command}
         {run_command}
@@ -502,6 +505,8 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         deployed_image_uri = self._get_deployed_image_uri(function_name)
@@ -978,6 +983,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         zip_contents: bytes,
         tmpdirname: str,
         env_vars: dict,
+        cpu: int | None = None,
     ) -> None:
         # Step 1: Unzip the ZIP file
         zip_path = os.path.join(tmpdirname, "code.zip")
@@ -1046,6 +1052,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         ENV GOROOT=/usr/local/go
 
         # Install Poetry via pip
+        RUN microdnf install -y gcc-c++ libstdc++-static && microdnf clean all
         RUN pip3 install poetry
 
         # Copy Python dependency management files
@@ -1105,7 +1112,7 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             # Check if its ResourceNotFoundException, which means the rule doesn't exist
             # We don't need to do anything in this case
             if not e.response["Error"]["Code"] == "ResourceNotFoundException":
-                print(f"Error removing the EventBridge rule {rule_name}: {e}")
+                print(f"Error getting the EventBridge rule {rule_name}: {e}")
 
             return None
 
@@ -1199,3 +1206,13 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         lambda_client.invoke(
             FunctionName=remote_framework_cli_name, InvocationType=invocation_type, Payload=json.dumps(payload)
         )
+
+    def query_metric(
+        self,
+        revision_name: str,
+        metric_type: str,
+        start: datetime,
+        end: datetime,
+        aligner: str | None = None,
+    ) -> float | None:
+        raise NotImplementedError

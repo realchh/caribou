@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from collections import defaultdict
 from typing import Optional
 
 import boto3
@@ -26,6 +27,7 @@ class DeploymentPackager:
     def __init__(self, config: Config) -> None:
         self._config = config
         self._pytz_version_cache: Optional[str] = None
+        self._opentelemetry_version_cache: dict[str, Optional[str]] = defaultdict(lambda: None)
 
     def build(self, config: Config, workflow: Workflow) -> None:
         if config.project_dir is None:
@@ -70,21 +72,77 @@ class DeploymentPackager:
             self._add_requirements_file(z, requirements_filename)
         return package_filename
 
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
     def _ensure_requirements_filename_complete(self, requirements_filename: str) -> None:
         with open(requirements_filename, "r", encoding="utf-8") as file:
             requirements = file.read().splitlines()
 
         requirements = [requirement.split("==")[0] for requirement in requirements]
 
-        with open(requirements_filename, "a", encoding="utf-8") as file:
+        provider = self._determine_home_provider()
+
+        lines_to_add = []
+
+        if provider == "aws":
             if "boto3" not in requirements:
-                file.write(f"\nboto3=={boto3.__version__}\n")
-            if "pyyaml" not in requirements:
-                file.write(f"\npyyaml=={yaml.__version__}\n")
-            if "pytz" not in requirements:
-                file.write(f"\npytz=={self._pytz_version}\n")
-            if "zstandard" not in requirements:
-                file.write(f"\nzstandard=={zstandard.__version__}\n")
+                lines_to_add.append(f"\nboto3=={boto3.__version__}\n")
+        if provider == "gcp":
+            if "google-cloud" not in requirements:
+                lines_to_add.append("\ngoogle-cloud==0.34.0\n")
+            if "google-cloud-storage" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-storage\n")
+            if "google-cloud-firestore" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-firestore\n")
+            if "google-cloud-pubsub" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-pubsub\n")
+            if "google-cloud-logging" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-logging\n")
+            if "google-cloud-trace" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-trace\n")
+            if "google-cloud-artifact-registry" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-artifact-registry\n")
+            if "google-cloud-eventarc" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-eventarc\n")
+            if "google-cloud-iam" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-iam\n")
+            if "google-cloud-resource-manager" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-resource-manager\n")
+            if "google-cloud-run" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-run\n")
+            if "google-cloud-monitoring" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-monitoring\n")
+            if "google-cloud-scheduler" not in requirements:
+                lines_to_add.append("\ngoogle-cloud-scheduler\n")
+            if "types-protobuf" not in requirements:
+                lines_to_add.append("\ntypes-protobuf\n")
+            if "functions-framework" not in requirements:
+                lines_to_add.append("\nfunctions-framework==3.*\n")
+            if "opentelemetry-api" not in requirements:
+                opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
+                lines_to_add.append(f"\nopentelemetry-api=={opentelemetry_api_version}\n")
+            if "opentelemetry-sdk" not in requirements:
+                opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
+                lines_to_add.append(f"\nopentelemetry-sdk=={opentelemetry_sdk_version}\n")
+            if "opentelemetry-exporter-gcp_trace" not in requirements:
+                opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
+                lines_to_add.append(f"\nopentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}\n")
+            if "opentelemetry-exporter-gcp_logging" not in requirements:
+                opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
+                lines_to_add.append(f"\nopentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}\n")
+        if "pyyaml" not in requirements:
+            lines_to_add.append(f"\npyyaml=={yaml.__version__}\n")
+        if "pytz" not in requirements:
+            lines_to_add.append(f"\npytz=={self._pytz_version}\n")
+        if "zstandard" not in requirements:
+            lines_to_add.append(f"\nzstandard=={zstandard.__version__}\n")
+        if "numpy" not in requirements:
+            lines_to_add.append("\nnumpy==2.2.1\n")
+
+        if lines_to_add:
+            append_content = "\n" + "\n".join(lines_to_add) + "\n"
+            with open(requirements_filename, "a", encoding="utf-8") as file:
+                file.write(append_content)
 
     @property
     def _pytz_version(self) -> str:
@@ -99,6 +157,33 @@ class DeploymentPackager:
             raise RuntimeError("Could not find pytz version")
         self._pytz_version_cache = pytz_version
         return pytz_version
+
+    def _get_opentelemetry_version(self, package_name: str) -> str:
+        # opentelemetry sadly does not have a __version__ attribute
+        valid_packages = ("api", "sdk", "exporter-gcp_trace", "exporter-gcp_logging")
+
+        if package_name not in valid_packages:
+            raise RuntimeError(f"Not a valid opentelemetry package name: {package_name}")
+
+        pypi_package_name = f"opentelemetry-{package_name}"
+
+        result_from_cache = self._opentelemetry_version_cache[pypi_package_name]
+        if result_from_cache:
+            return result_from_cache
+
+        opentelemetry_version = subprocess.check_output(
+            [sys.executable, "-m", "pip", "show", pypi_package_name]
+        ).decode("utf-8")
+
+        opentelemetry_version = next(
+            line.split(":")[1].strip() for line in opentelemetry_version.splitlines() if line.startswith("Version:")
+        )
+
+        if opentelemetry_version is None:
+            raise RuntimeError("Could not find opentelemetry version")
+
+        self._opentelemetry_version_cache[pypi_package_name] = opentelemetry_version
+        return opentelemetry_version
 
     def _add_requirements_file(self, zip_file: zipfile.ZipFile, requirements_filename: str) -> None:
         zip_file.write(requirements_filename, "requirements.txt")
@@ -140,6 +225,7 @@ class DeploymentPackager:
             ("utils.py",),
             ("models", "remote_client", "__init__.py"),
             ("models", "remote_client", "aws_remote_client.py"),
+            ("models", "remote_client", "gcp_remote_client.py"),
             ("models", "remote_client", "integration_test_remote_client.py"),
             ("models", "remote_client", "mock_remote_client.py"),
             ("models", "remote_client", "remote_client.py"),
@@ -229,13 +315,60 @@ class DeploymentPackager:
     def _create_deployment_package_dir(self, package_filename: str) -> None:
         os.makedirs(os.path.dirname(package_filename), exist_ok=True)
 
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
     def _build_dependencies(self, requirements_filename: str, temp_dir: str) -> None:
         with open(requirements_filename, "r", encoding="utf-8") as file:
             requirements = file.read().splitlines()
 
         # Add version of boto3 if not present in requirements
-        if "boto3" not in requirements:
-            requirements.append(f"boto3=={boto3.__version__}")
+        if self._determine_home_provider() == "aws":
+            if "boto3" not in requirements:
+                requirements.append(f"boto3=={boto3.__version__}")
+
+        if self._determine_home_provider() == "gcp":
+            if "google-cloud" not in requirements:
+                requirements.append("google-cloud==0.34.0")
+            if "google-cloud-storage" not in requirements:
+                requirements.append("google-cloud-storage")
+            if "google-cloud-firestore" not in requirements:
+                requirements.append("google-cloud-firestore")
+            if "google-cloud-pubsub" not in requirements:
+                requirements.append("google-cloud-pubsub")
+            if "google-cloud-logging" not in requirements:
+                requirements.append("google-cloud-logging")
+            if "google-cloud-trace" not in requirements:
+                requirements.append("google-cloud-trace")
+            if "google-cloud-artifact-registry" not in requirements:
+                requirements.append("google-cloud-artifact-registry")
+            if "google-cloud-eventarc" not in requirements:
+                requirements.append("google-cloud-eventarc")
+            if "google-cloud-iam" not in requirements:
+                requirements.append("google-cloud-iam")
+            if "google-cloud-resource-manager" not in requirements:
+                requirements.append("google-cloud-resource-manager")
+            if "google-cloud-run" not in requirements:
+                requirements.append("google-cloud-run")
+            if "google-cloud-monitoring" not in requirements:
+                requirements.append("google-cloud-monitoring")
+            if "google-cloud-scheduler" not in requirements:
+                requirements.append("google-cloud-scheduler")
+            if "types-protobuf" not in requirements:
+                requirements.append("types-protobuf")
+            if "functions-framework" not in requirements:
+                requirements.append("functions-framework==3.*")
+            if "opentelemetry-api" not in requirements:
+                opentelemetry_api_version = self._get_opentelemetry_version(package_name="api")
+                requirements.append(f"opentelemetry-api=={opentelemetry_api_version}")
+            if "opentelemetry-sdk" not in requirements:
+                opentelemetry_sdk_version = self._get_opentelemetry_version("sdk")
+                requirements.append(f"opentelemetry-sdk=={opentelemetry_sdk_version}")
+            if "opentelemetry-exporter-gcp_trace" not in requirements:
+                opentelemetry_gcp_trace_version = self._get_opentelemetry_version("exporter-gcp_trace")
+                requirements.append(f"opentelemetry-exporter-gcp_trace=={opentelemetry_gcp_trace_version}")
+            if "opentelemetry-exporter-gcp_logging" not in requirements:
+                opentelemetry_gcp_logging_version = self._get_opentelemetry_version("exporter-gcp_logging")
+                requirements.append(f"opentelemetry-exporter-gcp_logging=={opentelemetry_gcp_logging_version}")
 
         # Add version of pyyaml if not present in requirements
         if "pyyaml" not in requirements:
@@ -247,6 +380,10 @@ class DeploymentPackager:
         # Add version of z_standard if not present in requirements
         if "zstandard" not in requirements:
             requirements.append(f"zstandard=={zstandard.__version__}")
+
+        # Add version of numpy 2.2.1 to avoid breaking change in numpy 2.3.0
+        if "numpy" not in requirements:
+            requirements.append("numpy==2.2.1")
 
         temp_install_dir = tempfile.mkdtemp(dir=temp_dir, prefix="temp_install_")
 
@@ -303,6 +440,12 @@ class DeploymentPackager:
 
         for root, _, files in os.walk(project_dir):
             for filename in files:
+                if filename.startswith("geo.generated.json"):
+                    full_path = os.path.join(root, filename)
+                    if full_path.startswith(framework_dir):
+                        zip_path = full_path[len(project_dir) + 1 :]
+                        zip_file.write(full_path, zip_path)
+
                 if not filename.endswith(".py") or filename.startswith("test_"):  # Only add .py files, also skip tests
                     continue
 
@@ -330,6 +473,15 @@ class DeploymentPackager:
                 if full_path.startswith(framework_go_dir):
                     zip_path = full_path[len(project_dir) + 1 :]
                     zip_file.write(full_path, zip_path)
+
+    def _determine_home_provider(self) -> str:
+        home_region = self._config.home_region
+        if isinstance(home_region, dict):
+            return str(home_region.get("provider", "aws")).lower()
+        if isinstance(home_region, str):
+            return str(home_region.split(":")[0]).lower()
+
+        return "aws"
 
 
 def pip_execute(command: str, args: list[str]) -> tuple[bytes, bytes]:

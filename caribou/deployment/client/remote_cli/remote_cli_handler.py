@@ -1,6 +1,13 @@
+import base64
+import json
 import logging
+import os
 from typing import Any, Optional
 
+import flask
+from cloudevents.http import CloudEvent
+
+from caribou.common.provider import Provider
 from caribou.data_collector.components.carbon.carbon_collector import CarbonCollector
 from caribou.data_collector.components.performance.performance_collector import PerformanceCollector
 from caribou.data_collector.components.provider.provider_collector import ProviderCollector
@@ -12,12 +19,76 @@ from caribou.monitors.deployment_manager import DeploymentManager
 from caribou.monitors.deployment_migrator import DeploymentMigrator
 from caribou.syncers.log_syncer import LogSyncer
 
+if "K_SERVICE" in os.environ:
+    # We are in GCP, so we need to set up the gcp logging client.
+    # Cloud Run env variables: https://cloud.google.com/run/docs/container-contract#services-env-vars
+    import google.cloud.logging
+
+    gcp_logging_client = google.cloud.logging.Client()
+    gcp_logging_client.setup_logging()
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # Set the logging level
 
 
-def caribou_cli(event: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:  # pylint: disable=unused-argument
+def caribou_cli(
+    event: dict[str, Any] | flask.Request | CloudEvent,
+    context: dict[str, Any] | None = None,  # pylint: disable=unused-argument
+) -> dict[str, Any]:
+    if "K_SERVICE" in os.environ:
+        # We are on GCP. The 'request' is a Flask request object (HTTP call) or a CloudEvent (Pub/Sub call).
+        try:
+            if isinstance(event, flask.Request):
+                event_payload = event.get_json()
+            elif isinstance(event, CloudEvent):
+                event_payload = _extract_payload_from_cloud_event(event)
+            else:
+                raise AttributeError
+        except AttributeError:
+            # Handles cases where the request might not be what's expected
+            return {"status": 400, "message": "Invalid GCP request format"}
+    else:
+        # We are on AWS Lambda. The 'request' is the 'event' dict.
+        # The actual payload is usually a JSON string in the 'body'.
+        event_payload = event
+
+    return cli_logic(event_payload)
+
+
+def _extract_payload_from_cloud_event(cloud_event: CloudEvent) -> Optional[dict[str, Any]]:
+    """
+    Extract the payload from a CloudEvent (GCP Pub/sub call)
+    """
+    try:
+        if hasattr(cloud_event, "data") and cloud_event.data:
+            if isinstance(cloud_event.data, dict):
+                # Check if it's a Pub/Sub message format
+                if "message" in cloud_event.data:
+                    message_data = cloud_event.data["message"].get("data", "")
+                    if message_data:
+                        # Decode base64 message from Pub/Sub
+                        decoded_data = base64.b64decode(message_data).decode("utf-8")
+                        return json.loads(decoded_data)
+                else:
+                    return cloud_event.data
+            elif isinstance(cloud_event.data, (str, bytes)):
+                # Handle string or bytes data
+                if isinstance(cloud_event.data, bytes):
+                    decoded_data = cloud_event.data.decode("utf-8")
+                else:
+                    decoded_data = cloud_event.data
+                return json.loads(decoded_data)
+
+        logger.error("No data found in CloudEvent or unsupported format")
+        return None
+
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+        logger.error("Failed to decode CloudEvent payload: %s", e)
+        return None
+
+
+def cli_logic(event: dict[str, Any]) -> dict[str, Any]:
     action = event.get("action", None)
     if not action:
         logger.error("No action specified")
@@ -67,6 +138,14 @@ def handle_manage_deployments(event: dict[str, Any]) -> dict[str, Any]:
         return {
             "status": 400,
             "message": "Invalid deployment_metrics_calculator_type specified. Allowed values are 'simple', 'go'",
+        }
+
+    provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+    if provider == Provider.GCP.value and deployment_metrics_calculator_type == "go":
+        logger.error("Go deployment metrics calculator is not supported for GCP provider")
+        return {
+            "status": 400,
+            "message": "Go deployment metrics calculator is not supported for GCP provider",
         }
 
     logger.info("Deployment check started, using %s calculator", deployment_metrics_calculator_type)

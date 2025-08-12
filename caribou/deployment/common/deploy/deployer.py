@@ -10,6 +10,8 @@ from caribou.common.constants import (
     WORKFLOW_PLACEMENT_DECISION_TABLE,
 )
 from caribou.common.models.endpoints import Endpoints
+from caribou.common.provider import Provider
+from caribou.common.utils import generate_workflow_gcp_function_name
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.deploy.deployment_packager import DeploymentPackager
 from caribou.deployment.common.deploy.executor import Executor
@@ -119,11 +121,9 @@ class Deployer:
         filtered_function_to_deployment_regions = self._filter_function_to_deployment_regions(
             function_to_deployment_regions, deployed_regions
         )
-
         self._workflow = self._workflow_builder.re_build_workflow(
             self._config, filtered_function_to_deployment_regions, workflow_function_descriptions, deployed_regions
         )
-
         # Disabled as part of issue #293
         # self._deployment_packager.re_build(self._workflow, self._endpoints.get_deployment_resources_client())
 
@@ -133,7 +133,6 @@ class Deployer:
         deployment_plan = DeploymentPlan(self._workflow.get_deployment_instructions())
 
         assert self._executor is not None, "Executor is None, this should not happen"
-
         self._executor.execute(deployment_plan)
 
         self._update_deployed_regions(deployed_regions)
@@ -142,13 +141,23 @@ class Deployer:
     def _get_function_to_deployment_regions(self, staging_area_data: dict) -> dict[str, dict[str, str]]:
         function_to_deployment_regions: dict[str, dict[str, str]] = {}
         for instance_name, placement in staging_area_data.items():
-            function_name = (
-                instance_name.split(":", maxsplit=1)[0]
-                + "_"
-                + placement["provider_region"]["provider"]
-                + "-"
-                + placement["provider_region"]["region"]
-            )
+            provider = placement["provider_region"]["provider"]
+            if provider == Provider.GCP.value:
+                function_run_name = instance_name.split(":", maxsplit=1)[0]
+                function_name = generate_workflow_gcp_function_name(
+                    self._config.workflow_name,
+                    self._config.workflow_version,
+                    function_run_name,
+                    placement["provider_region"],
+                )
+            else:
+                function_name = (
+                    instance_name.split(":", maxsplit=1)[0]
+                    + "_"
+                    + placement["provider_region"]["provider"]
+                    + "-"
+                    + placement["provider_region"]["region"]
+                )
             if function_name not in function_to_deployment_regions:
                 function_to_deployment_regions[function_name] = {
                     "provider": placement["provider_region"]["provider"],
