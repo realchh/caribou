@@ -285,7 +285,7 @@ def deploy_remote_cli(
             ## (https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html)
             max_timeout_s = 15 * 60
 
-        timeout_s: int = _validate_parameter(timeout, max_timeout_s, 1, max_timeout_s, "Timeout", "seconds")
+        timeout_s: int = _validate_parameter(timeout, 900, 1, max_timeout_s, "Timeout", "seconds")
 
         # Ephemeral Storage
         ## Default 5120 == 5 GB (Should be enough for most use cases)

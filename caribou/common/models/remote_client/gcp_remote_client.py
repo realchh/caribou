@@ -649,6 +649,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         regional_quota_bytes = 429_496_729_600 * 0.9
 
         # Calculate max instances based on quota
+        # https://cloud.google.com/run/docs/configuring/max-instances-limits
         max_instances_by_quota = int(regional_quota_bytes / memory_bytes_per_instance)
 
         max_instances = max(1, min(100, max_instances_by_quota))
