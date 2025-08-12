@@ -764,7 +764,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         CMD ["functions-framework", \
         "--source", "{source_file}", \
         "--target", "{target_function}", \
-        "--signature-type", "cloudevent"]
+        "--signature-type", "event"]
         """
 
     def _build_docker_image(self, context_path: str, image_name: str) -> None:
@@ -1470,7 +1470,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         for subscription in subscriber_client.list_subscriptions(request={"project": f"projects/{self._project_id}"}):
             if subscription.topic == topic_identifier:
                 try:
+                    subscription_details = subscriber_client.get_subscription(subscription=subscription.name)
                     subscriber_client.delete_subscription(subscription=subscription.name)
+
+                    if (
+                        subscription_details.dead_letter_policy
+                        and subscription_details.dead_letter_policy.dead_letter_topic
+                    ):
+                        try:
+                            publisher_client.delete_topic(
+                                topic=subscription_details.dead_letter_policy.dead_letter_topic
+                            )
+                        except google_api_exceptions.NotFound:
+                            pass
+
                 except google_api_exceptions.NotFound:
                     pass
 

@@ -1551,7 +1551,7 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         )
 
         # Verify topic was deleted
-        self.gcp_client._pubsub_publisher_client.delete_topic.assert_called_once_with(topic=topic_identifier)
+        self.gcp_client._pubsub_publisher_client.delete_topic.assert_called_with(topic=topic_identifier)
 
     def test_get_topic_identifier_not_found(self):
         """Test getting topic identifier for non-existent topic"""

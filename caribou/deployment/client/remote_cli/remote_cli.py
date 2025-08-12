@@ -86,6 +86,9 @@ def remove_gcp_remote_framework() -> None:
         print(f"Removing artifact registry repository {REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}")
         gcp_remote_client.remove_artifact_registry_repository(REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME)
 
+    print(f"Removing pub/sub topic {REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}-topic and its subscription and dead letter")
+    gcp_remote_client.remove_messaging_topic(f"{REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME}-topic")
+
 
 def deploy_remote_framework(
     project_dir: str, timeout: int, memory_size: int, ephemeral_storage: int, cpu: int | None = None
