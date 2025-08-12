@@ -15,6 +15,21 @@ For deployment to AWS see the [Deployment to AWS](#deployment-to-aws) section.
 
 Make sure you first have the necessary dependencies according to how you intend to use Caribou installed. See the [Installation](INSTALL.md) guide for more information.
 
+## Switching between AWS and GCP
+
+You can switch between AWS and GCP deployment using the `CARIBOU_DEFAULT_PROVIDER` environment variable.
+
+To use AWS, execute the following command:
+```
+export CARIBOU_DEFAULT_PROVIDER=aws
+```
+To use GCP, execute the following command:
+```
+export CARIBOU_DEFAULT_PROVIDER=gcp
+```
+
+### Important: If you are changing the framework's home region, please teardown the framework before changing the default. Not doing so will cause inaccessible, hanging functions.
+
 ## Client side CLI
 
 Some client-side commands can be executed in the `AWS Remote CLI`, provided it is deployed. 
@@ -33,7 +48,9 @@ Where `<workflow_name>` is the name of the new workflow.
 
 You can then use the Caribou Python API to define and develop the workflow.
 
-### Workflow ID
+#### Note: for GCP functions, please refer to cloud run [CPU limits](https://cloud.google.com/run/docs/configuring/services/cpu#setting) and [memory limits](https://cloud.google.com/run/docs/configuring/services/memory-limits#cpu-minimum).
+
+### Workflow ID
 
 When a new workflow is set up, it is initialized with the semantic version `0.0.1` as configured in the config and `app.py` workflow initialization.
 This, together with the `<workflow_name>`, will constitute the workflow ID (`<workflow_name>-<version_number>`).
@@ -133,7 +150,9 @@ poetry run caribou log_sync
 This might take a while, depending on the number of workflows and the amount of logs that need to be synced.
 Also, there is an inherent buffer of fifteen minutes, meaning that logs are only synced if they are at least fifteen minutes old.
 
-**Note:** May be executed remotely with the `-r` or `--remote` flag to execute them remotely and asynchronously. 
+**Note:** May be executed remotely with the `-r` or `--remote` flag to execute them remotely and asynchronously.
+
+**Note 2:** In GCP, there is a default quota for reading logs of 60 log entry list requests per minute. We implemented a default delay of 1 seconds between each request, which fetches up to 1000 logs at once.
 
 ### Data Collecting
 
@@ -236,6 +255,7 @@ Additionally, the following environment variables must be set before remote depl
 ```bash
 export ELECTRICITY_MAPS_AUTH_TOKEN=<your_token>
 export GOOGLE_API_KEY=<your_key>
+export CARIBOU_DEFAULT_PROVIDER=aws
 ```
 
 ## Setup Automatic Components (For AWS Remote CLI)
@@ -256,6 +276,91 @@ This configures the timers in the default expressions listed below:
  - `log_syncer`: By default, invokes the Lambda function daily at 12:05 AM. Schedule expression: 'cron(5 0 * * ? *)'
  - `deployment_manager`: By default, invokes the Lambda function daily at 01:00 AM. Schedule expression: 'cron(0 1 * * ? *)'
  - `deployment_migrator`: By default, invokes the Lambda function daily at 02:00 AM. Schedule expression: 'cron(0 2 * * ? *)'
+
+
+**Note:** Running this command will reset all previously customized time configurations.
+
+At any time, the user can see all available timers and their configurations (and if setup) by running the following command:
+```bash
+poetry run caribou list_timers
+```
+
+Optionally, if the user wishes to have only some components run automatically or to modify the timer of any specific components, they can use the following command:
+```bash
+poetry run caribou setup_timer <timer>
+```
+Where `<timer>` is the name of the timer you want to configure or modify. It can be one of the following options:
+  - `provider_collector`
+  - `carbon_collector`
+  - `performance_collector`
+  - `log_syncer`
+  - `deployment_manager`
+  - `deployment_migrator`
+
+Optionally, you may also specify the time configurations using the following parameter:
+ - `schedule_expression`: Use `--schedule_expression` or `-se`. Default: The same default times set for `setup_all_timers` for each individual timer.
+
+To remove a specific timer, use the following command:
+```bash
+poetry run caribou remove_timer <timer>
+```
+Where `<timer>` is the name of the timer you want to remove, using the same names as in `setup_timer`.
+
+
+To remove all the configured timers, use the following command:
+
+```bash
+poetry run caribou remove_all_timers
+```
+
+## Deployment to GCP (GCP Remote CLI)
+To deploy the framework to GCP after completing the local setup process, use the following command while inside the main `caribou` directory. 
+Ensure that you can see both the `caribou` and `caribou-go` folders in this directory.
+
+
+```bash
+poetry run caribou deploy_remote_cli
+```
+
+You may also specify the `memory` (in MB), `timeout` (in seconds), `ephemeral_storage` (in MB), and `vcpu` (the amount of vCPU) using the following flags:
+ - `memory`: Use `--memory` or `-m`. Default: 1,769 MB
+ - `timeout`: Use `--timeout` or `-t`. Default: 900 seconds
+ - `ephemeral_storage`: Use `--ephemeral_storage` or `-s`. Default: 5,120 MB. Note: GCP's implementation of ephemeral storage uses memory. Keep the total value of memory plus ephemeral storage less than 32,768 MB (32 GB)
+ - `vcpu`: Use `--vcpu` or `-c`. Default: 2 vCPU. Use [this document](https://cloud.google.com/run/docs/configuring/services/memory-limits) to see the minimum amount of vCPU for a given memory setup. 
+
+To remove the remote framework, use the following command:
+
+```bash
+poetry run caribou remove_remote_cli
+```
+
+**Note:** Caribou must be properly installed locally first (See the [Installation](INSTALL.md)). 
+Additionally, the following environment variables must be set before remote deployment:
+
+```bash
+export ELECTRICITY_MAPS_AUTH_TOKEN=<your_token>
+export GOOGLE_API_KEY=<your_key>
+export CARIBOU_DEFAULT_PROVIDER=gcp
+```
+
+## Setup Automatic Components (For GCP Remote CLI)
+After deploying the GCP remote CLI `deploy_remote_cli`, the user can set up automatic timers for all relevant Caribou components.
+This includes automating data collection (provider, performance, carbon, etc.), log synchronization, deployment management (solving for new deployments when needed), and deployment migration.
+This is implemented through the use of `Cloud Scheduler` which execute the Caribou remote framework Lambda function with customized JSON inputs.
+
+The user may simply set up all the component timers automatically through the following command:
+
+
+```bash
+poetry run caribou setup_all_timers
+```
+This configures the timers in the default expressions listed below:
+ - `provider_collector`: By default, invokes the Lambda function at 12:05 AM on the first day of the month. Schedule expression: 'cron(5 0 1 * *)'
+ - `carbon_collector`: By default, invokes the Lambda function daily at 12:30 AM. Schedule expression: 'cron(30 0 * * *)'
+ - `performance_collector`: By default, invokes the Lambda function daily at 12:30 AM. Schedule expression: 'cron(30 0 * * *)'
+ - `log_syncer`: By default, invokes the Lambda function daily at 12:05 AM. Schedule expression: 'cron(5 0 * * *)'
+ - `deployment_manager`: By default, invokes the Lambda function daily at 01:00 AM. Schedule expression: 'cron(0 1 * * *)'
+ - `deployment_migrator`: By default, invokes the Lambda function daily at 02:00 AM. Schedule expression: 'cron(0 2 * * *)'
 
 
 **Note:** Running this command will reset all previously customized time configurations.

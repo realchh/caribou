@@ -27,6 +27,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Historical data csv directory
+caribou/data_collector/utils/ec_maps_zone_finder/hourly_data/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -90,10 +93,10 @@ plotting/plots/*.png
 testing
 testing.py
 
-# Solver benchmarks dag image files
-benchmarks/solver_benchmarks/images/
+# Solver aws_benchmarks dag image files
+benchmarks/aws_benchmarks/solver_benchmarks/images/
 
 # Benchmark results
-benchmarks/solver_benchmarks/results/
+benchmarks/aws_benchmarks/solver_benchmarks/results/
 
 Dockerfile

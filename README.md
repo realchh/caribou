@@ -4,7 +4,7 @@
 
 [![Build Status](https://github.com/ubc-cirrus-lab/caribou/actions/workflows/workflow.yaml/badge.svg)](https://github.com/ubc-cirrus-lab/caribou/actions/workflows/workflow.yaml) [![GitHub license](https://img.shields.io/badge/license-Apache%202-blue.svg)](https://github.com/ubc-cirrus-lab/caribou/blob/main/LICENSE)
 
-Caribou is a framework for running and deploying complex serverless workflows multi-constraint and multi-objective aware on hyper-scalers over multiple regions.
+Caribou is a framework for running and deploying complex serverless workflows multi-constraint and multi-objective aware on hyper-scalers over multiple regions and providers.
 
 </div>
 
@@ -14,7 +14,8 @@ See the [Quick Start](QUICK_START.md) guide.
 
 ##  Introduction
 
-Caribou is a framework for running and deploying complex serverless workflows multi-constraint and multi-objective aware on hyper-scalers over multiple regions.
+Caribou is a framework for running and deploying complex serverless workflows multi-constraint and multi-objective aware on hyper-scalers over multiple regions and providers.
+The framework currently supports Amazon Web Services and Google Cloud Platform.
 The framework is designed to be self-adapting and self-optimizing with regards to the carbon footprint, cost, and performance of the workflows.
 A workflow that is developed and deployed using the Caribou Python package can be run and solved by the framework, which will then automatically, depending on constraints and objectives, adapt the workflow deployment to optimize the workflow's performance, cost, and carbon footprint.
 The priority of optimization is determined by the objectives set by the workflow developer in the corresponding workflow deployment manifest.
@@ -23,8 +24,8 @@ The overhead of the system plays a crucial role in the optimization process and 
 
 ##  Example
 
-An example workflow can be found in `examples/small_sync_example` including the source code of the workflow in the `app.py` file as well as the deployment manifest in the `.caribou` directory.
-More information on the example workflow can be found in the respective [README](examples/small_sync_example/readme.md).
+An example workflow for each provider can be found in `examples/aws_small_sync_example` and `examples/gcp_small_sync_example` including the source code of the workflow in the `app.py` file as well as the deployment manifest in the `.caribou` directory.
+More information on the example workflow can be found in the respective [AWS README](examples/aws_small_sync_example/readme.md) and [GCP_README](examples/gcp_small_sync_example/readme.md).
 
 See the [Installation](#installation) section on how to get set up and the [Quick Start](QUICK_START.md) guide on how to run the example workflow.
 

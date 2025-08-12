@@ -3,9 +3,10 @@ import logging
 import random
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import botocore.exceptions
+import google.api_core.exceptions
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
@@ -22,8 +23,11 @@ from caribou.common.constants import (
 )
 from caribou.common.models.endpoints import Endpoints
 from caribou.common.models.remote_client.aws_remote_client import AWSRemoteClient
+from caribou.common.models.remote_client.gcp_remote_client import GCPRemoteClient
 from caribou.common.models.remote_client.remote_client import RemoteClient
 from caribou.common.models.remote_client.remote_client_factory import RemoteClientFactory
+from caribou.common.provider import Provider
+from caribou.common.utils import generate_workflow_gcp_function_name, generate_workflow_service_account_id
 
 # Set logging level for Boto3 to WARNING to suppress INFO messages
 # Mainly to suppress 'Found credentials in environment variables.' message
@@ -232,10 +236,23 @@ class Client:
         # Remove entry from the workflow images table
         # (This table is used to track the ECR images of all
         # functions in the workflow)
-        self._endpoints.get_deployment_resources_client().remove_key(
-            CARIBOU_WORKFLOW_IMAGES_TABLE, self._workflow_id.replace(".", "_")
-        )
+        if isinstance(self._endpoints.get_deployment_resources_client(), GCPRemoteClient):
+            workflow_name = self._workflow_id.split("-")[0]
+            workflow_ver = self._workflow_id.split("-")[1]
 
+            gcp_workflow_id = generate_workflow_gcp_function_name(
+                workflow_name,
+                workflow_ver,
+                workflow_name,
+                {"provider": "dummy", "region": "dummy-dummy"},
+            )
+
+            gcp_workflow_id = "-".join(gcp_workflow_id.split("-")[:5])
+            self._endpoints.get_deployment_resources_client().remove_key(CARIBOU_WORKFLOW_IMAGES_TABLE, gcp_workflow_id)
+        else:
+            self._endpoints.get_deployment_resources_client().remove_key(
+                CARIBOU_WORKFLOW_IMAGES_TABLE, self._workflow_id.replace(".", "_")
+            )
         # Remove entry from the workflow summary table
         # (This table is produced by the log syncer for the FORGETTING_NUMBER
         # most recent and or relevant workflow runs)
@@ -254,8 +271,20 @@ class Client:
         deployed_region_json = deployment_manager_config.get("deployed_regions")
         deployed_region: dict[str, dict[str, Any]] = json.loads(deployed_region_json)
 
+        gcp_regions: set[str] = set()
+
         for function_physical_instance, provider_region in deployed_region.items():
+            deploy_region: dict[str, str] = provider_region["deploy_region"]
+            print(f"removing function {function_physical_instance} from {deploy_region}")
             self._remove_function_instance(function_physical_instance, provider_region["deploy_region"])
+
+            if deploy_region.get("provider") == Provider.GCP.value:
+                gcp_regions.add(deploy_region["region"])
+
+        if gcp_regions:
+            gcp_region = next(iter(gcp_regions))
+            gcp_region_client = self._get_remote_client(Provider.GCP.value, gcp_region)
+            self._remove_shared_gcp_resource(cast(GCPRemoteClient, gcp_region_client))
 
     def _remove_function_instance(self, function_instance: str, provider_region: dict[str, str]) -> None:
         provider = provider_region["provider"]
@@ -264,7 +293,6 @@ class Client:
         role_name = f"{identifier}-role"
         messaging_topic_name = f"{identifier}_messaging_topic"
         client = self._get_remote_client(provider, region)
-
         # Remove the ECR repository
         try:
             if isinstance(client, AWSRemoteClient):
@@ -273,6 +301,14 @@ class Client:
             print(f"Could not remove ecr repository {identifier}: {str(e)}")
         except botocore.exceptions.ClientError as e:
             print(f"Could not remove ecr repository {identifier}: {str(e)}")
+
+        try:
+            if isinstance(client, GCPRemoteClient):
+                client.remove_artifact_registry_repository(identifier)
+        except RuntimeError as e:
+            print(f"Could not remove artifact registry repository {identifier}: {str(e)}")
+        except google.api_core.exceptions.GoogleAPICallError as e:
+            print(f"Could not remove artifact registry repository {identifier}: {str(e)}")
 
         # Remove the SNS messaging topic and all associated subscriptions
         try:
@@ -290,11 +326,24 @@ class Client:
             print(f"Could not remove function {identifier}: {str(e)}")
 
         # Remove the IAM role
-        try:
-            client.remove_role(role_name)
-        except RuntimeError as e:
-            print(f"Could not remove role {role_name}: {str(e)}")
-        except botocore.exceptions.ClientError as e:
-            print(f"Could not remove role {role_name}: {str(e)}")
+        if not isinstance(client, GCPRemoteClient):
+            try:
+                client.remove_role(role_name)
+            except RuntimeError as e:
+                print(f"Could not remove role {role_name}: {str(e)}")
+            except botocore.exceptions.ClientError as e:
+                print(f"Could not remove role {role_name}: {str(e)}")
 
         print(f"Removed function {function_instance} from provider {provider} in region {region}")
+
+    def _remove_shared_gcp_resource(self, gcp_region_client: GCPRemoteClient) -> None:
+        if self._workflow_id is None:
+            return
+
+        workflow_name = self._workflow_id.split("-")[0]
+        workflow_version = self._workflow_id.split("-")[1]
+
+        service_account_name = generate_workflow_service_account_id(workflow_name, workflow_version)
+        service_account_name = f"{service_account_name}-role"
+
+        gcp_region_client.remove_role(service_account_name)

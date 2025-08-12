@@ -18,6 +18,8 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         raise NotImplementedError()
@@ -198,6 +200,8 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         raise NotImplementedError()
@@ -240,4 +244,59 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
 
     @abstractmethod
     def remove_resource(self, key: str) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def query_metric(
+        self,
+        revision_name: str,
+        metric_type: str,
+        start: datetime,
+        end: datetime,
+        aligner: str | None = None,
+    ) -> float | None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def deploy_remote_cli(
+        self,
+        function_name: str,
+        handler: str,
+        role_arn: str,
+        timeout: int,
+        memory_size: int,
+        ephemeral_storage: int,
+        zip_contents: bytes,
+        tmpdirname: str,
+        env_vars: dict,
+        cpu: int | None = None,
+    ) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_timer_rule_schedule_expression(self, rule_name: str) -> Optional[str]:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def remove_timer_rule(self, lambda_function_name: str, rule_name: str) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def create_timer_rule(
+        self, lambda_function_name: str, schedule_expression: str, rule_name: str, event_payload: str
+    ) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def invoke_remote_framework_internal_action(self, action_type: str, action_events: dict[str, Any]) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def invoke_remote_framework_with_payload(
+        self, payload: dict[str, Any], invocation_type: str = "RequestResponse"
+    ) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         raise NotImplementedError()

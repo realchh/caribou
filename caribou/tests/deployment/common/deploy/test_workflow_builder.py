@@ -299,6 +299,7 @@ class TestWorkflowBuilder(unittest.TestCase):
         config = Mock(spec=Config)
         config.workflow_name = "test_workflow"
         config.workflow_app.name = "not_test_workflow"
+        config.workflow_version = "0.0.1"  # Add this line
 
         with self.assertRaisesRegex(RuntimeError, "Workflow name in config and workflow app must match"):
             self.builder.build_workflow(config, [{"provider": "provider1", "region": "region1"}])
@@ -536,6 +537,8 @@ class TestWorkflowBuilder(unittest.TestCase):
         config = Mock(spec=Config)
         config.workflow_name = "workflow_name"
         config.workflow_version = "workflow_version"
+        config.project_dir = "/tmp/project_dir"
+        config.iam_policy_file = '{"aws": "testpolicy"}'
         function_to_deployment_region = {
             "function_name_provider1-region1": {"provider": "provider1", "region": "region1"},
             "function_name_provider2-region2": {"provider": "provider2", "region": "region2"},

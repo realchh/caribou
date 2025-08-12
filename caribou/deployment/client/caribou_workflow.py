@@ -4,10 +4,12 @@ from __future__ import annotations
 import ast
 import base64
 import binascii
+import copy
 import json
 import logging
 import os
 import random
+import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
@@ -17,8 +19,10 @@ from caribou.common.constants import (
     GLOBAL_TIME_ZONE,
     HOME_REGION_THRESHOLD,
     LOG_VERSION,
+    MAX_AWS_WORKERS,
+    MAX_GCP_TRANSFER_SIZE,
+    MAX_GCP_WORKERS,
     MAX_TRANSFER_SIZE,
-    MAX_WORKERS,
     MAXIMUM_HOPS_FROM_CLIENT_REQUEST,
     TIME_FORMAT,
     WORKFLOW_PLACEMENT_DECISION_TABLE,
@@ -29,6 +33,14 @@ from caribou.common.models.remote_client.remote_client_factory import RemoteClie
 from caribou.common.provider import Provider
 from caribou.common.utils import get_function_source
 from caribou.deployment.client.caribou_function import CaribouFunction
+
+if "K_SERVICE" in os.environ:
+    # We are in GCP, so we need to set up the gcp logging client.
+    # Cloud Run env variables: https://cloud.google.com/run/docs/container-contract#services-env-vars
+    import google.cloud.logging
+
+    gcp_logging_client = google.cloud.logging.Client()
+    gcp_logging_client.setup_logging()
 
 # Alter the logging to use CARIBOU level instead of info
 CARIBOU_LEVEL = 25
@@ -102,31 +114,62 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self.functions: dict[str, CaribouFunction] = {}
         self._run_id_to_successor_index: dict[str, int] = {}
         self._function_names: set[str] = set()
-        self._endpoint = Endpoints()
-        self._current_workflow_placement_decision: dict[str, Any] = {}
+        self._endpoint: Endpoints | None = None
 
-        # For thread pool -> Invoke successor functions asynchronously
-        self._thread_pool: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-        self._futures: list[Future] = []
-
-        # For logging
-        ## This will be overritten by the first function that is called
-        ## Just here as a placeholder to avoid using None
-        self._function_start_time: datetime = datetime.now(GLOBAL_TIME_ZONE)
+        # Make workflow placement decision thread-local instead of shared across all executions
+        self._thread_local: threading.local = threading.local()
 
         # For redirecting the function to the home region
         self._home_region_threshold: float = HOME_REGION_THRESHOLD  # fractional % of the time run in home region
 
-        # Track the number of hops from client request
-        # To forcefully terminate the workflow if it exceeds a certain number
-        ## This will be overritten by input function arguments
-        self._number_of_hops_from_client_request: int = 0
+        # Cache for max number of worker thread
+        self._max_concurrent_ops_cache: dict[str, int] = {}
 
-        # Cache the remote clients (one per provider-region pair)
-        self._remote_clients: dict[str, RemoteClient] = {}
+    def _get_provider_optimal_thread_count(
+        self, current_instance_name: str, workflow_placement_decision: dict[str, Any]
+    ) -> int:
+        """
+        Calculate optimal thread count based on the deployment provider.
+        """
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+
+        if provider == Provider.AWS.value:
+            return MAX_AWS_WORKERS
+
+        if provider == Provider.GCP.value:
+            return self._get_max_gcp_concurrent_operations(current_instance_name, workflow_placement_decision)
+
+        # Default fallback (could add Azure, testing purposes, etc.)
+        return MAX_AWS_WORKERS
+
+    def _get_max_gcp_concurrent_operations(
+        self, current_instance_name: str, workflow_placement_decision: dict[str, Any]
+    ) -> int:
+        """
+        Thread-safe cache implementation for concurrent operations calculation.
+        """
+        cache_key = f"{workflow_placement_decision['run_id']}-{current_instance_name}"
+
+        if cache_key in self._max_concurrent_ops_cache:
+            return self._max_concurrent_ops_cache[cache_key]
+
+        # Max number of worker threads = number of instances that are being called
+        instance_info = workflow_placement_decision.get("instances", {}).get(current_instance_name, {})
+        succeeding_instances = instance_info.get("succeeding_instances", [])
+        max_concurrent = max(1, min(len(succeeding_instances), MAX_GCP_WORKERS))
+
+        # Multiple threads might compute and store the same value - that's OK
+        self._max_concurrent_ops_cache[cache_key] = max_concurrent
+
+        return max_concurrent
+
+    def _get_endpoint(self) -> Endpoints:
+        if self._endpoint is None:
+            self._endpoint = Endpoints()
+        return self._endpoint
 
     def get_run_id(self) -> str:
-        return self._current_workflow_placement_decision["run_id"]
+        return self.get_workflow_placement_decision()["run_id"]
 
     def get_successors(self, function: CaribouFunction) -> list[CaribouFunction]:
         """
@@ -151,6 +194,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 raise RuntimeError(f"Could not find function with name {function_name}, was the function registered?")
         return successors
 
+    # pylint: disable=too-many-statements
     def invoke_serverless_function(
         self,
         function: Callable[..., Any],
@@ -176,6 +220,12 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             successor_function_name,
         ) = self.get_successor_instance_name(function, workflow_placement_decision)
 
+        if not hasattr(self._thread_local, "request_futures"):
+            self._thread_local.request_futures = []
+            self._thread_local.thread_pool = ThreadPoolExecutor(
+                max_workers=self._get_provider_optimal_thread_count(current_instance_name, workflow_placement_decision)
+            )
+
         def invoke_worker(
             invocation_start_time: datetime,
             json_payload: str,
@@ -183,7 +233,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             transmission_taint: str,
             conditional: bool,
         ) -> None:
-            time_from_function_start = (invocation_start_time - self._function_start_time).total_seconds()
+            time_from_function_start = (invocation_start_time - self._get_function_start_time()).total_seconds()
 
             provider, region, identifier = self.get_successor_workflow_placement_decision(
                 successor_instance_name, workflow_placement_decision
@@ -297,7 +347,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         payload_wrapper: dict[str, Any] = {
             "workflow_placement_decision": successor_workflow_placement_decision_dictionary,
             "transmission_taint": transmission_taint,
-            "number_of_hops_from_client_request": self._number_of_hops_from_client_request,
+            "number_of_hops_from_client_request": self._get_number_of_hops(),
         }
         alternative_json_payload: Optional[str] = None
         payload_wrapper["target"] = successor_function_name
@@ -314,7 +364,13 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/publish.html
         # For safety, we will set the limit to 256,000 bytes (250 KB)
         payload_size_byte = len(json_payload.encode("utf-8"))
-        if payload_size_byte > MAX_TRANSFER_SIZE:
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+        if provider == Provider.GCP.value:
+            max_size = MAX_GCP_TRANSFER_SIZE
+        else:
+            max_size = MAX_TRANSFER_SIZE
+
+        if payload_size_byte > max_size:
             log_message = (
                 f"DEBUG_MESSAGE: PAYLOAD_SIZE "
                 f"({payload_size_byte / (1024**3)}) GB "
@@ -329,14 +385,16 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             raise ValueError(
                 f"Payload size is too large, please reduce the size of the payload. "
                 f"Current payload size is {payload_size_byte} bytes, please limit to"
-                f"under 250,000 bytes."
+                f"under {max_size} bytes."
             )
 
         # Start the invocation timer AFTER the successor instance name has been determined
         # As they will also be in the critical path
         invocation_start_time = datetime.now(GLOBAL_TIME_ZONE)
-        if self._thread_pool is not None and isinstance(self._thread_pool, ThreadPoolExecutor):
-            future: Future = self._thread_pool.submit(
+        if self._thread_local.request_futures is not None and isinstance(
+            self._thread_local.thread_pool, ThreadPoolExecutor
+        ):
+            future: Future = self._thread_local.thread_pool.submit(
                 invoke_worker,
                 invocation_start_time,
                 json_payload,
@@ -344,7 +402,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 transmission_taint,
                 conditional,
             )
-            self._futures.append(future)
+            self._thread_local.request_futures.append(future)
         else:
             # Run the worker in the main thread
             invoke_worker(
@@ -454,7 +512,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             payload_wrapper: dict[str, Any] = {
                 "workflow_placement_decision": successor_workflow_placement_decision,
                 "transmission_taint": transmission_taint,
-                "number_of_hops_from_client_request": self._number_of_hops_from_client_request,
+                "number_of_hops_from_client_request": self._get_number_of_hops(),
                 "target": successor_function_name,
             }
             # payload_wrapper["workflow_placement_decision"] = successor_workflow_placement_decision
@@ -529,7 +587,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         workflow_placement_decision: dict[str, Any],
     ) -> tuple[str, dict[str, Any], str]:
         # Get the name of the successor function
-        successor_function_name = self.functions[function.original_function.__name__].name  # type: ignore
+        successor_function_name = function.original_function.__name__  # type: ignore
 
         # Set the current instance name based on whether it is the entry point or not
         current_instance_name = workflow_placement_decision["current_instance_name"]
@@ -552,7 +610,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self, workflow_placement_decision: dict[str, Any], next_instance_name: str
     ) -> dict[str, Any]:
         # Copy the workflow_placement decision
-        successor_workflow_placement_decision = workflow_placement_decision.copy()
+        successor_workflow_placement_decision = copy.deepcopy(workflow_placement_decision)
         # Update the current instance name to the next instance name
         successor_workflow_placement_decision["current_instance_name"] = next_instance_name
         return successor_workflow_placement_decision
@@ -571,10 +629,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         successor_instances = instance["succeeding_instances"]
         # If there is only one successor instance, return it
         if len(successor_instances) == 1:
-            if (
-                successor_instances[0].split(":", maxsplit=1)[0]
-                == f"{self.name}-{self.version.replace('.', '_')}-{successor_function_name}"
-            ):
+            name_prefix = successor_instances[0].split(":", maxsplit=1)[0]
+            if name_prefix == successor_function_name or name_prefix.endswith(f"-{successor_function_name}"):
                 return successor_instances[0]
             raise RuntimeError(
                 f"Could not find successor instance for successor function name {successor_function_name} in {successor_instances}"  # pylint: disable=line-too-long
@@ -582,10 +638,8 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # If there are multiple successor instances, return the first one that matches the successor function
         # name and has the correct index
         for successor_instance in successor_instances:
-            if (
-                successor_instance.split(":", maxsplit=1)[0]
-                == f"{self.name}-{self.version.replace('.', '_')}-{successor_function_name}"
-            ):
+            name_prefix = successor_instance.split(":", maxsplit=1)[0]
+            if name_prefix == successor_function_name or name_prefix.endswith(f"-{successor_function_name}"):
                 if successor_instance.split(":", maxsplit=2)[1] == "sync":
                     return successor_instance
                 if successor_instance.split(":", maxsplit=2)[1].split("_")[-1] == str(
@@ -604,7 +658,38 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         The structure of the workflow placement decision is explained in the
         `docs/component_interaction.md` file under `Workflow Placement Decision`.
         """
-        return self._current_workflow_placement_decision
+        if not hasattr(self._thread_local, "current_workflow_placement_decision"):
+            raise RuntimeError("Workflow placement decision not set for current thread")
+        return self._thread_local.current_workflow_placement_decision
+
+    def _set_workflow_placement_decision(self, workflow_placement_decision: dict[str, Any]) -> None:
+        """
+        Set the workflow placement decision for the current thread.
+        """
+        self._thread_local.current_workflow_placement_decision = workflow_placement_decision
+
+    def _get_function_start_time(self) -> datetime:
+        # For logging
+
+        ## This first call will be overritten by the first function that is called
+        ## Just here as a placeholder to avoid using None
+        if not hasattr(self._thread_local, "function_start_time"):
+            self._thread_local.function_start_time = datetime.now(GLOBAL_TIME_ZONE)
+        return self._thread_local.function_start_time
+
+    def _set_function_start_time(self, start_time: datetime) -> None:
+        self._thread_local.function_start_time = start_time
+
+    def _get_number_of_hops(self) -> int:
+        # Track the number of hops from client request
+        # To forcefully terminate the workflow if it exceeds a certain number
+        ## This first call will be overritten by input function arguments
+        if not hasattr(self._thread_local, "number_of_hops_from_client_request"):
+            self._thread_local.number_of_hops_from_client_request = 0
+        return self._thread_local.number_of_hops_from_client_request
+
+    def _set_number_of_hops(self, hops: int) -> None:
+        self._thread_local.number_of_hops_from_client_request = hops
 
     def get_predecessor_data(self) -> list[dict[str, Any]]:
         """
@@ -719,10 +804,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         """
         Get the workflow_placement decision from the platform.
         """
+        endpoint = self._get_endpoint()
         (
             result,
             consumed_read_capacity,
-        ) = self._endpoint.get_deployment_algorithm_workflow_placement_decision_client().get_value_from_table(
+        ) = endpoint.get_deployment_algorithm_workflow_placement_decision_client().get_value_from_table(
             WORKFLOW_PLACEMENT_DECISION_TABLE, f"{self.name}-{self.version}"
         )
         if result is not None:
@@ -819,12 +905,16 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                     raise RuntimeError("environment_variables must be a list of dicts with 'value' as a string")
                 if "AWS_REGION" in env_variable["key"]:  # AWS_REGION is a reserved environment variable
                     raise RuntimeError("environment_variables cannot contain AWS_REGION")
+                if (
+                    "FUNCTION_REGION" in env_variable["key"]
+                ):  # FUNCTION_REGION is a reserved environment variable in gcp
+                    raise RuntimeError("environment_variables cannot contain FUNCTION_REGION")
 
         def _register_handler(func: Callable[..., Any]) -> Callable[..., Any]:
             handler_name = name if name is not None else func.__name__
 
             def wrapper(*args, **kwargs):  # type: ignore  # pylint: disable=unused-argument
-                self._function_start_time = datetime.now(GLOBAL_TIME_ZONE)
+                self._set_function_start_time(datetime.now(GLOBAL_TIME_ZONE))
 
                 # Retrieve the argument and check if it it is valid
                 caribou_wrapper_argument, size_of_input_payload_gb = self._retrieve_caribou_wrapper_argument(
@@ -835,14 +925,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 self._ensure_hops_within_constraints(caribou_wrapper_argument)
 
                 # Retrieve the workflow placement decision from the wrapper
-                self._current_workflow_placement_decision = (
-                    workflow_placement_decision
-                ) = self._retrieve_wpd_from_wrapper_or_system(
+                workflow_placement_decision = self._retrieve_wpd_from_wrapper_or_system(
                     caribou_wrapper_argument,
                     entry_point,
                     allow_placement_decision_override,
                     handler_name,
                 )
+
+                self._set_workflow_placement_decision(workflow_placement_decision)
+
                 if entry_point and self._need_to_redirect(caribou_wrapper_argument, workflow_placement_decision):
                     # If the function is an entry point and needs to be redirected, redirect it
                     return self._redirect_to_desired_provider_and_region(
@@ -857,6 +948,20 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 payload = caribou_wrapper_argument.get("payload", {})
                 result: Any = None
                 self._run_id_to_successor_index[workflow_placement_decision["run_id"]] = 0
+
+                current_instance_name = workflow_placement_decision["current_instance_name"]
+
+                optimal_thread_count = self._get_provider_optimal_thread_count(
+                    current_instance_name, workflow_placement_decision
+                )
+
+                if not hasattr(self._thread_local, "request_futures"):
+                    self._thread_local.request_futures = []
+                if not hasattr(self._thread_local, "thread_pool"):
+                    self._thread_local.thread_pool = ThreadPoolExecutor(max_workers=optimal_thread_count)
+
+                initial_futures_count = len(self._thread_local.request_futures)
+
                 try:
                     # Call the function with the payload and the caribou metadata
                     result = func(payload)
@@ -864,17 +969,26 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                     user_code_end_time = datetime.now(GLOBAL_TIME_ZONE)
 
                     # Wait until all the futures (Invoke serverless functions) are done
-                    for future in self._futures:
+                    current_futures = self._thread_local.request_futures[initial_futures_count:]
+
+                    for future in current_futures:
                         future.result()
-                    self._futures = []
+
+                    if initial_futures_count == 0:
+                        self._thread_local.thread_pool.shutdown(wait=True)
+                        # Clear the thread-local data for next request
+                        if hasattr(self._thread_local, "request_futures"):
+                            del self._thread_local.request_futures
+                        if hasattr(self._thread_local, "thread_pool"):
+                            del self._thread_local.thread_pool
 
                     end_time = datetime.now(GLOBAL_TIME_ZONE)
 
-                    user_execution_time = (user_code_end_time - self._function_start_time).total_seconds()
+                    user_execution_time = (user_code_end_time - self._get_function_start_time()).total_seconds()
                     log_message = (
                         f'EXECUTED: INSTANCE ({workflow_placement_decision["current_instance_name"]}) with '
                         f"USER_EXECUTION_TIME ({user_execution_time}) s and "
-                        f"TOTAL_EXECUTION_TIME ({(end_time - self._function_start_time).total_seconds()}) s"
+                        f"TOTAL_EXECUTION_TIME ({(end_time - self._get_function_start_time()).total_seconds()}) s"
                     )
                     self.log_for_retrieval(
                         log_message,
@@ -892,6 +1006,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                         log_message,
                         workflow_placement_decision["run_id"],
                     )
+
+                    if initial_futures_count == 0:
+                        if hasattr(self._thread_local, "thread_pool"):
+                            self._thread_local.thread_pool.shutdown(wait=False)
+                        # Clear the thread-local data
+                        if hasattr(self._thread_local, "request_futures"):
+                            del self._thread_local.request_futures
+                        if hasattr(self._thread_local, "thread_pool"):
+                            del self._thread_local.thread_pool
 
                     # Raise the error now
                     # To terminate the lambda function
@@ -936,7 +1059,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             if time_first_recieved is not None:
                 # If the time_first_recieved is in the argument, convert it to a proper format
                 datetime_first_received = datetime.strptime(time_first_recieved, TIME_FORMAT)
-                init_latency_first_received = str((self._function_start_time - datetime_first_received).total_seconds())
+                init_latency_first_received = str(
+                    (self._get_function_start_time() - datetime_first_received).total_seconds()
+                )
             else:
                 # datetime_first_received = self._function_start_time
                 init_latency_first_received = str(0.0)
@@ -950,7 +1075,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
                 # Get s from the time difference
                 # Note due to desync between client and server, the time difference can be negative
-                init_latency_from_client = str((self._function_start_time - datetime_invoked_at_client).total_seconds())
+                init_latency_from_client = str(
+                    (self._get_function_start_time() - datetime_invoked_at_client).total_seconds()
+                )
 
             # Retrieve the user payload size if available (Aka if this is redirected)
             # Otherwise the size of input is the size of the user payload
@@ -966,7 +1093,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             # As this can be used to determine when the message was first recieved.
             wpd_data_size = workflow_placement_decision.get("data_size", 0.0)
             wpd_consumed_read_capacity = workflow_placement_decision.get("consumed_read_capacity", 0.0)
-            time_from_function_start = (datetime.now(GLOBAL_TIME_ZONE) - self._function_start_time).total_seconds()
+            time_from_function_start = (
+                datetime.now(GLOBAL_TIME_ZONE) - self._get_function_start_time()
+            ).total_seconds()
             log_message = (
                 f"ENTRY_POINT: Entry Point INSTANCE "
                 f'({workflow_placement_decision["current_instance_name"]}) '
@@ -981,16 +1110,16 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             )
             if overriden_workflow_placement_size is not None:
                 log_message += f" OVERRIDEN_WORKFLOW_PLACEMENT_SIZE ({overriden_workflow_placement_size}) GB"
-            self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._function_start_time)
+            self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._get_function_start_time())
         # Log the Invocation and transmission taint for the function
         # NOTE: Ensure that the log time is the time when the function first recieved the message
         # As this is used to calculate the transmission latency.
         log_message = (
             f'INVOKED: INSTANCE ({workflow_placement_decision["current_instance_name"]}) '
             f"called with TAINT ({transmission_taint}) "
-            f"with NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._number_of_hops_from_client_request})"
+            f"with NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._get_number_of_hops()})"
         )
-        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._function_start_time)
+        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._get_function_start_time())
 
     def _retrieve_wpd_from_wrapper_or_system(
         self,
@@ -1042,8 +1171,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ) = self._get_current_node_desired_workflow_placement_decision(workflow_placement_decision)
 
         # Get the current region and provider
-        current_region: str = os.environ["AWS_REGION"]
-        current_provider: str = str(Provider.AWS.value)
+        current_region: str = ""
+        current_provider: str = ""
+
+        if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
+            current_provider = str(Provider.AWS.value)
+            current_region = os.environ.get("AWS_REGION", "")
+        elif "K_SERVICE" in os.environ:
+            current_provider = str(Provider.GCP.value)
+            current_region = os.environ.get("FUNCTION_REGION", "")
 
         # Generate a unique transmission taint for the redirection
         transmission_taint = uuid.uuid4().hex
@@ -1056,11 +1192,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             "payload": caribou_wrapper_argument.get("payload", {}),
             "target": caribou_wrapper_argument.get("target", None),
             "workflow_placement_decision": workflow_placement_decision,
-            "time_first_recieved": self._function_start_time.strftime(TIME_FORMAT),
+            "time_first_recieved": self._get_function_start_time().strftime(TIME_FORMAT),
             "transmission_taint": transmission_taint,
             "permit_redirection": False,  # IMPORTANT: Do not allow further redirections
             "redirected": True,  # IMPORTANT: Mark that this request has been redirected
-            "number_of_hops_from_client_request": self._number_of_hops_from_client_request,
+            "number_of_hops_from_client_request": self._get_number_of_hops(),
         }
 
         # Get the time the request was sent from the client (if available)
@@ -1089,7 +1225,9 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
             # Get s from the time difference
             # Note due to desync between client and server, the time difference can be negative
-            init_latency_from_client = str((self._function_start_time - datetime_invoked_at_client).total_seconds())
+            init_latency_from_client = str(
+                (self._get_function_start_time() - datetime_invoked_at_client).total_seconds()
+            )
 
         # Log the redirection information
         # NOTE: Ensure that the log time is the time when the function first recieved the message
@@ -1105,14 +1243,14 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             f"INPUT_PAYLOAD_SIZE ({size_of_input_payload_gb}) GB "
             f"OUTPUT_PAYLOAD_SIZE ({size_of_output_payload_gb}) GB "
             f"Invoking IDENTIFIER ({first_function_identifier}) with TAINT ({transmission_taint}) "
-            f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._number_of_hops_from_client_request}) "
+            f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._get_number_of_hops()}) "
             f"INVOCATION_TIME_FROM_FUNCTION_START "
-            f"({(invocation_start_time - self._function_start_time).total_seconds()}) s and "
+            f"({(invocation_start_time - self._get_function_start_time()).total_seconds()}) s and "
             f"FINISH_TIME_FROM_INVOCATION_START "
             f"({(invocation_finish_time - invocation_start_time).total_seconds()}) s "
             f"INIT_LATENCY_FROM_CLIENT ({init_latency_from_client}) s"
         )
-        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._function_start_time)
+        self.log_for_retrieval(log_message, workflow_placement_decision["run_id"], self._get_function_start_time())
 
         # Log the CPU model (From Redirector)
         self._log_cpu_model(workflow_placement_decision, True)
@@ -1136,8 +1274,15 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ) = self._get_current_node_desired_workflow_placement_decision(workflow_placement_decision)
 
         # Get the current region and provider
-        current_region: str = os.environ["AWS_REGION"]
-        current_provider: str = str(Provider.AWS.value)
+        current_region: str = ""
+        current_provider: str = ""
+
+        if "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
+            current_provider = str(Provider.AWS.value)
+            current_region = os.environ.get("AWS_REGION", "")
+        elif "K_SERVICE" in os.environ:
+            current_provider = str(Provider.GCP.value)
+            current_region = os.environ.get("FUNCTION_REGION", "")
 
         # Check if the current function is indeed placed in the
         # desired region (And if it will need to redirect)
@@ -1209,7 +1354,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ## Note: Here we intentially log the wpd size and consumed capacity of the retrieved WPD
         ## Regardless of override, as the override is only for testing and debugging purposes,
         ## and thus its size may not be representative of the actual size of the WPD.
-        time_from_function_start = (retrieved_wpd_time - self._function_start_time).total_seconds()
+        time_from_function_start = (retrieved_wpd_time - self._get_function_start_time()).total_seconds()
         log_message = (
             f"RETRIVE_WPD: "
             f'SEND_TO_HOME_DECISION ({workflow_placement_decision["send_to_home_region"]}) '
@@ -1229,12 +1374,10 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # Retrieve the argument and check if it is a dictionary.
         # (Currently only support dictionary arguments)
         argument_raw = args[0]
-
         if not isinstance(argument_raw, dict):
-            # TODO: Make this error message more informative
             raise RuntimeError(
                 "Something went wrong, the input is not valid and was ",
-                "not converted to a dictioanry. Please refer to documentation "
+                "not converted to a dictionary. Please refer to documentation "
                 f"for accepted format. Type: {type(argument_raw)}, Argument: {argument_raw}.",
             )
 
@@ -1252,6 +1395,23 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             size_of_input_payload_gb = len(raw_sns_message.encode("utf-8")) / (1024**3) if entry_point else -1.0
 
             caribou_wrapper_argument = json.loads(raw_sns_message, cls=CustomDecoder)
+        elif (
+            "@type" in argument_raw
+            and argument_raw["@type"] == "type.googleapis.com/google.pubsub.v1.PubsubMessage"
+            and "data" in argument_raw
+        ):
+            size_of_input_payload_gb = len(argument_raw["data"].encode("utf-8")) / (1024**3) if entry_point else -1.0
+            base64_data = argument_raw["data"]
+            decoded_data = base64.b64decode(base64_data)
+            # if data is compressed, decode from base64 and then decompress it. otherwise, parse json. also change
+            # caribou/common/models/remote_client/gcp_remote_client.py:870
+            # json_string = decompress_json_str(decoded_data)
+            json_string = decoded_data.decode("utf-8")
+            decoded_json = json.loads(json_string)
+            if "payload" in decoded_json or "workflow_placement_decision" in decoded_json:
+                caribou_wrapper_argument = decoded_json
+            else:
+                caribou_wrapper_argument = {"payload": decoded_json}
         else:
             # For non-SNS invocations, the argument is already a dictionary
             # the argument is simply the event (argument_raw).
@@ -1264,7 +1424,6 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         # Check if the argument is a dictionary (At this point it SHOULD be a dictionary)
         if not isinstance(caribou_wrapper_argument, dict):
-            # TODO: Make this error message more informative
             raise RuntimeError(
                 "Something went wrong, the argument is not a dictionary. ",
                 "Please check the format of the argument, refer to documentation "
@@ -1285,27 +1444,29 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         """
 
         # Get the number of redirects from client request
-        self._number_of_hops_from_client_request = (
+        number_of_hops_from_client_request = (
             max(int(caribou_wrapper_argument.get("number_of_hops_from_client_request", 0)), 0) + 1
         )
+
+        self._set_number_of_hops(number_of_hops_from_client_request)
 
         # Check if the number of hops from the client request exceeds the maximum number of hops
         # Used to prevent infinite loops (If the workflow placement decision is incorrect for
         # any reason, this will prevent the function from being called infinitely)
-        if self._number_of_hops_from_client_request > MAXIMUM_HOPS_FROM_CLIENT_REQUEST:
+        if self._get_number_of_hops() > MAXIMUM_HOPS_FROM_CLIENT_REQUEST:
             run_id: str = caribou_wrapper_argument.get("run_id", "UNKNOWN")
 
             # Log the error message
             log_message = (
                 f"EXCEED_HOP_ERROR: "
-                f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._number_of_hops_from_client_request}) "
+                f"NUMBER_OF_HOPS_FROM_CLIENT_REQUEST ({self._get_number_of_hops()}) "
                 f"EXCEEDS_MAXIMUM_HOPS_FROM_CLIENT_REQUEST ({MAXIMUM_HOPS_FROM_CLIENT_REQUEST})"
             )
             self.log_for_retrieval(log_message, run_id)
             raise RuntimeError(
                 "The number of hops from the client request exceeds the "
                 "maximum number of hops allowed."
-                f"Mumber of hops: {self._number_of_hops_from_client_request}, "
+                f"Mumber of hops: {self._get_number_of_hops()}, "
                 f"Maximum number of hops: {MAXIMUM_HOPS_FROM_CLIENT_REQUEST}"
             )
 
@@ -1337,7 +1498,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             "current_provider": provider,
             "current_region": region,
             "cpu_model": cpu_model,
-            "function_start_time": self._function_start_time.strftime(TIME_FORMAT),
+            "function_start_time": self._get_function_start_time().strftime(TIME_FORMAT),
         }
 
         return caribou_metadata
@@ -1382,13 +1543,16 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         return cpu_model
 
     def _get_remote_client(self, provider: str, region: str) -> RemoteClient:
+        if not hasattr(self._thread_local, "remote_clients"):
+            self._thread_local.remote_clients = {}
+
         # Check if it is already in the cache
         key = f"{provider}-{region}"
-        if key in self._remote_clients:
-            return self._remote_clients[key]
+        if key in self._thread_local.remote_clients:
+            return self._thread_local.remote_clients[key]
 
         # Create a new remote client
         remote_client = RemoteClientFactory.get_remote_client(provider, region)
-        self._remote_clients[key] = remote_client
+        self._thread_local.remote_clients[key] = remote_client
 
         return remote_client

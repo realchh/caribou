@@ -19,7 +19,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run black
@@ -32,7 +32,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run pylint
@@ -47,7 +47,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run tests
@@ -67,7 +67,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run mypy
@@ -80,7 +80,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run isort
@@ -93,7 +93,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup poetry
         uses: ./.github/actions/poetry
       - name: Run integration tests
@@ -105,7 +105,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup Go
         uses: ./.github/actions/go
       - name: Initialize Go module

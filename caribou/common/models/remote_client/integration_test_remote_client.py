@@ -333,6 +333,8 @@ class IntegrationTestRemoteClient(RemoteClient):  # pylint: disable=too-many-pub
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         conn = self._db_connection()
@@ -376,6 +378,8 @@ class IntegrationTestRemoteClient(RemoteClient):  # pylint: disable=too-many-pub
         environment_variables: dict[str, str],
         timeout: int,
         memory_size: int,
+        cpu: float | None = None,
+        concurrency: int | None = None,
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         conn = self._db_connection()
@@ -473,3 +477,50 @@ class IntegrationTestRemoteClient(RemoteClient):  # pylint: disable=too-many-pub
     # pylint: disable=unused-argument
     def get_insights_logs_between(self, function_instance: str, start: datetime, end: datetime) -> list[str]:
         return []
+
+    def query_metric(
+        self,
+        revision_name: str,
+        metric_type: str,
+        start: datetime,
+        end: datetime,
+        aligner: str | None = None,
+    ) -> float | None:
+        return None
+
+    def deploy_remote_cli(
+        self,
+        function_name: str,
+        handler: str,
+        role_arn: str,
+        timeout: int,
+        memory_size: int,
+        ephemeral_storage: int,
+        zip_contents: bytes,
+        tmpdirname: str,
+        env_vars: dict,
+        cpu: int | None = None,
+    ) -> None:
+        pass
+
+    def get_timer_rule_schedule_expression(self, rule_name: str) -> Optional[str]:
+        pass
+
+    def remove_timer_rule(self, lambda_function_name: str, rule_name: str) -> None:
+        return
+
+    def create_timer_rule(
+        self, lambda_function_name: str, schedule_expression: str, rule_name: str, event_payload: str
+    ) -> None:
+        return
+
+    def invoke_remote_framework_internal_action(self, action_type: str, action_events: dict[str, Any]) -> None:
+        return
+
+    def invoke_remote_framework_with_payload(
+        self, payload: dict[str, Any], invocation_type: str = "RequestResponse"
+    ) -> None:
+        return
+
+    def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
+        return False

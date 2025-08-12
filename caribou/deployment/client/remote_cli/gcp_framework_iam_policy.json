@@ -1,0 +1,20 @@
+{
+  "gcp": {
+    "roles": [
+      "roles/run.admin",
+      "roles/artifactregistry.admin",
+      "roles/iam.serviceAccountAdmin",
+      "roles/iam.serviceAccountUser",
+      "roles/resourcemanager.projectIamAdmin",
+      "roles/pubsub.admin",
+      "roles/cloudscheduler.admin",
+      "roles/datastore.user",
+      "roles/storage.objectAdmin",
+      "roles/logging.viewer",
+      "roles/monitoring.viewer",
+      "roles/run.invoker",
+      "roles/datastore.owner",
+      "roles/firebase.admin"
+    ]
+  }
+}

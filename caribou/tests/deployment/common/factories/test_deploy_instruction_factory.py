@@ -1,5 +1,6 @@
 import unittest
 from caribou.deployment.common.deploy_instructions.aws_deploy_instructions import AWSDeployInstructions
+from caribou.deployment.common.deploy_instructions.gcp_deploy_instructions import GCPDeployInstructions
 from caribou.deployment.common.factories.deploy_instruction_factory import DeployInstructionFactory
 
 
@@ -33,8 +34,8 @@ class TestDeployInstructionFactory(unittest.TestCase):
         deploy_instruction_factory = DeployInstructionFactory()
 
         # Act & Assert
-        with self.assertRaises(NotImplementedError):
-            deploy_instruction_factory.get_deploy_instructions(provider, region)
+        deploy_instructions = deploy_instruction_factory.get_deploy_instructions(provider, region)
+        self.assertIsInstance(deploy_instructions, GCPDeployInstructions)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from cron_descriptor import Options, get_description
 
 # Caribou imports
 from caribou.common.models.endpoints import Endpoints
+from caribou.common.provider import Provider
 from caribou.common.setup.setup_tables import main as setup_tables_func
 from caribou.common.teardown.teardown_tables import main as teardown_tables_func
 from caribou.data_collector.components.carbon.carbon_collector import CarbonCollector
@@ -20,11 +21,11 @@ from caribou.deployment.client.remote_cli.remote_cli import (
     get_all_available_timed_cli_functions,
     get_all_default_timed_cli_functions,
     get_cli_invoke_payload,
-    is_aws_framework_deployed,
-    remove_aws_timers,
+    is_framework_deployed,
     remove_remote_framework,
+    remove_timers,
     report_timer_schedule_expression,
-    setup_aws_timers,
+    setup_timers,
     valid_framework_dir,
 )
 from caribou.deployment.common.config.config import Config
@@ -49,7 +50,7 @@ def _execute_remote_command(
 ) -> None:
     """Helper function to execute a command on the remote framework."""
     framework_cli_remote_client = Endpoints().get_framework_cli_remote_client()
-    framework_deployed = is_aws_framework_deployed(framework_cli_remote_client, verbose=verbose)
+    framework_deployed = is_framework_deployed(verbose)
     if not framework_deployed:
         raise click.ClickException("The remote framework is not deployed.")
 
@@ -237,13 +238,18 @@ def remove(workflow_id: str, remote: bool) -> None:
         Client(workflow_id).remove()
 
 
-@cli.command("deploy_remote_cli", help="Deploy the remote framework cli to AWS Lambda.")
+@cli.command("deploy_remote_cli", help="Deploy the remote framework cli to AWS Lambda/GCP.")
 @click.option("--memory", "-m", help="The desired framework memory in MB.")
 @click.option("--timeout", "-t", help="The desired remote CLI timeout time in seconds.")
 @click.option("--ephemeral_storage", "-s", help="The desired ephemeral storage size of framework in MB.")
+@click.option("--vcpu", "-c", help="The desired amount of vCPU. Only used for GCP.")
 @click.pass_context
 def deploy_remote_cli(
-    ctx: click.Context, memory: Optional[str], timeout: Optional[str], ephemeral_storage: Optional[str]
+    ctx: click.Context,
+    memory: Optional[str],
+    timeout: Optional[str],
+    ephemeral_storage: Optional[str],
+    vcpu: Optional[str],
 ) -> None:
     project_dir = ctx.obj["project_dir"]
 
@@ -268,16 +274,28 @@ def deploy_remote_cli(
         ## Default 1769 == 1 full vCPU (https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html)
         memory_mb: int = _validate_parameter(memory, 1769, 128, 10240, "Memory", "MB")
 
+        provider = os.environ.get("CARIBOU_DEFAULT_PROVIDER", Provider.AWS.value)
+
         # Timeout
-        ## Default 900 == 15 minutes Maximum timeout (15 minutes)
-        ## (https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html)
-        timeout_s: int = _validate_parameter(timeout, 900, 1, 900, "Timeout", "seconds")
+        if provider == Provider.GCP.value:
+            ## GCP max timeout == 60 minutes, recommended amount = 15 minutes
+            max_timeout_s = 60 * 60
+        else:
+            ## Default 900 == 15 minutes Maximum timeout (15 minutes)
+            ## (https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html)
+            max_timeout_s = 15 * 60
+
+        timeout_s: int = _validate_parameter(timeout, 900, 1, max_timeout_s, "Timeout", "seconds")
 
         # Ephemeral Storage
         ## Default 5120 == 5 GB (Should be enough for most use cases)
         ephemeral_storage_mb: int = _validate_parameter(ephemeral_storage, 5120, 512, 10240, "Ephemeral Storage", "MB")
 
-        deploy_remote_framework(project_dir, timeout_s, memory_mb, ephemeral_storage_mb)
+        # CPU Count (for GCP)
+        ## Default 2 vCPU (valid for memory + storage < 8 GB or 8192 MB)
+        cpu: int = _validate_parameter(vcpu, 2, 1, 8, "CPU", "vCPU")
+
+        deploy_remote_framework(project_dir, timeout_s, memory_mb, ephemeral_storage_mb, cpu)
 
 
 @cli.command("list_timers", help="See all available timers.")
@@ -334,22 +352,28 @@ def setup_timer(
         schedule_expression = get_all_default_timed_cli_functions()[timer]
 
     # Setup the timer
-    setup_aws_timers([(timer, schedule_expression)])
+    setup_timers([(timer, schedule_expression)])
 
 
 @cli.command(
     "setup_all_timers",
     help=(
-        "Setup ALL automatic timer for AWS remote CLI with default rules. "
+        "Setup ALL automatic timer for remote CLI with default rules. "
         "Use list_timers to see available timers, and setup_timer to modify."
     ),
 )
 @click.pass_context
 def setup_all_timers(_: click.Context) -> None:
     """
+    (AWS)
     Setup automatic timers for AWS Lambda functions. (Use cron(...) or rate(...) expressions)
     Format Info:
     https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-scheduled-rule-pattern.html
+
+    (GCP)
+    Setup automatic timers for GCP Cloud Functions. Use cron(...) expressions)
+    Format Info:
+    https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules#cron_job_format
     """
     default_schedule_expressions = get_all_default_timed_cli_functions()
     new_rules: list[tuple[str, str]] = []
@@ -357,7 +381,7 @@ def setup_all_timers(_: click.Context) -> None:
         schedule_expr = default_schedule_expressions[function_name]
         new_rules.append((function_name, schedule_expr))
 
-    setup_aws_timers(new_rules)
+    setup_timers(new_rules)
 
 
 @cli.command("remove_timer", help="Remove an existing remote timer. Use list_timers to see available timers.")
@@ -368,18 +392,19 @@ def setup_all_timers(_: click.Context) -> None:
 )
 def remove_timer(timer: str) -> None:
     # Remove the timer
-    remove_aws_timers([timer])
+    remove_timers([timer])
 
 
-@cli.command("remove_all_timers", help="Remove ALL automatic timers for AWS remote CLI.")
+@cli.command("remove_all_timers", help="Remove ALL automatic timers for remote CLI.")
 def remove_all_timers() -> None:
     """
-    Remove all automatic timers for AWS Lambda functions.
+    (AWS) Remove all automatic timers for AWS Lambda functions.
+    (GCP) Remove all automatic timers for GCP Cloud Run services.
     """
-    remove_aws_timers(AVAILABLE_CLI_FUNCTIONS)
+    remove_timers(AVAILABLE_CLI_FUNCTIONS)
 
 
-@cli.command("remove_remote_cli", help="Deploy the remote framework from AWS Lambda.")
+@cli.command("remove_remote_cli", help="Remove the remote framework.")
 def remove_remote_cli() -> None:
     remove_remote_framework()
 
