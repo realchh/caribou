@@ -146,6 +146,7 @@ class ExecutionData:  # pylint: disable=too-many-instance-attributes
 
         # vcpu ratio (assuming linear, intercept at 0 scaling)
         # for aws lambda https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html
+        # TODO: forgot about this
         vcpu = total_memory / 1769
 
         # Calculate the cpu utilization

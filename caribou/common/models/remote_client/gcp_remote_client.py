@@ -539,9 +539,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         image_uri: str
+        workflow_id = "-".join(role_identifier.split("-")[:-1])
         deployed_image_uri = self._get_deployed_image_uri(function_name)
         if len(deployed_image_uri) > 0:
-            image_uri = self._copy_image_to_region(deployed_image_uri)
+            image_uri = self._copy_image_if_not_exists(deployed_image_uri)
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function creation")
@@ -560,7 +561,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     f_dockerfile.write(dockerfile_content)
 
                 # Step 3: Build the Docker Image
-                image_name = f"{function_name.lower()}:latest"
+                image_name = f"{workflow_id.lower()}:latest"
                 self._build_docker_image(tmpdirname, image_name)
 
                 # Step 4: Upload the Image to Artifact Registry
@@ -670,7 +671,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         document = client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id)
         document.set({function_name_simple: image_name}, merge=True)
 
-    def _copy_image_to_region(self, deployed_image_uri: str) -> str:
+    def _copy_image_if_not_exists(self, deployed_image_uri: str) -> str:
         parts = deployed_image_uri.split("/")
         original_image_name = parts[-1]
         original_region = "-".join(original_image_name.split("-")[8:10])
@@ -697,19 +698,25 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         original_ecr_registry = f"{original_region}-docker.pkg.dev"
 
-        # Use /tmp directory which is writable in Cloud Run
-        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
-            print(f"Using crane to copy image from {original_ecr_registry} to {host}")
-            try:
-                subprocess.run(
-                    ["gcrane", "cp", deployed_image_uri, new_image_uri],
-                    cwd=temp_dir,
-                    check=True,
-                )
-                logger.info("Docker image %s copied successfully.", new_image_uri)
-            except subprocess.CalledProcessError as e:
-                logger.error("Failed to copy Docker image %s. Error: %s", new_image_uri, e)
+        client = self._artifact_registry_client
+        try:
+            client.get_repository(name=new_image_uri)
             return new_image_uri
+        except google_api_exceptions.NotFound:
+            # Use /tmp directory which is writable in Cloud Run
+            with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
+                print(f"Using crane to copy image from {original_ecr_registry} to {host}")
+                try:
+                    subprocess.run(
+                        ["gcrane", "cp", deployed_image_uri, new_image_uri],
+                        cwd=temp_dir,
+                        check=True,
+                    )
+                    logger.info("Docker image %s copied successfully.", new_image_uri)
+                except subprocess.CalledProcessError as e:
+                    logger.error("Failed to copy Docker image %s. Error: %s", new_image_uri, e)
+                return new_image_uri
+
 
     def _get_deployed_image_uri(self, function_name: str) -> str:
         workflow_instance_id = "-".join(function_name.split("-")[0:5])
@@ -841,7 +848,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         image_uri: str
         deployed_image_uri = self._get_deployed_image_uri(function_name)
         if len(deployed_image_uri) > 0:
-            image_uri = self._copy_image_to_region(deployed_image_uri)
+            image_uri = self._copy_image_if_not_exists(deployed_image_uri)
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function update")
