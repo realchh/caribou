@@ -272,19 +272,28 @@ class Client:
         deployed_region: dict[str, dict[str, Any]] = json.loads(deployed_region_json)
 
         gcp_regions: set[str] = set()
+        aws_regions: set[str] = set()
 
         for function_physical_instance, provider_region in deployed_region.items():
             deploy_region: dict[str, str] = provider_region["deploy_region"]
-            print(f"removing function {function_physical_instance} from {deploy_region}")
+            print(f"Removing function {function_physical_instance} from provider {deploy_region.get("provider", "")}"
+                  f" in region {deploy_region.get("region", "")}")
             self._remove_function_instance(function_physical_instance, provider_region["deploy_region"])
 
             if deploy_region.get("provider") == Provider.GCP.value:
                 gcp_regions.add(deploy_region["region"])
+            if deploy_region.get("provider") == Provider.AWS.value:
+                aws_regions.add(deploy_region["region"])
 
         if gcp_regions:
             gcp_region = next(iter(gcp_regions))
             gcp_region_client = self._get_remote_client(Provider.GCP.value, gcp_region)
             self._remove_shared_gcp_resource(cast(GCPRemoteClient, gcp_region_client))
+
+        if aws_regions:
+            for region in aws_regions:
+                aws_region_client = self._get_remote_client(Provider.AWS.value, region)
+                self._remove_shared_aws_resource(cast(AWSRemoteClient, aws_region_client))
 
     def _remove_function_instance(self, function_instance: str, provider_region: dict[str, str]) -> None:
         provider = provider_region["provider"]
@@ -293,14 +302,18 @@ class Client:
         role_name = f"{identifier}-role"
         messaging_topic_name = f"{identifier}_messaging_topic"
         client = self._get_remote_client(provider, region)
+        # print(f"removing function {function_instance} from provider {provider} in region {region}")
+        # print(f"role name {role_name}, messaging topic name {messaging_topic_name}, identifier {identifier}")
         # Remove the ECR repository
-        try:
-            if isinstance(client, AWSRemoteClient):
-                client.remove_ecr_repository(identifier)
-        except RuntimeError as e:
-            print(f"Could not remove ecr repository {identifier}: {str(e)}")
-        except botocore.exceptions.ClientError as e:
-            print(f"Could not remove ecr repository {identifier}: {str(e)}")
+        # try:
+        #     if isinstance(client, AWSRemoteClient):
+        #         ecr_identifier = "-".join(identifier.split("-")[0:2])
+        #         print(f"removing ecr repository {identifier}")
+        #         client.remove_ecr_repository(identifier)
+        # except RuntimeError as e:
+        #     print(f"Could not remove ecr repository {identifier}: {str(e)}")
+        # except botocore.exceptions.ClientError as e:
+        #     print(f"Could not remove ecr repository {identifier}: {str(e)}")
 
         try:
             if isinstance(client, GCPRemoteClient):
@@ -347,3 +360,11 @@ class Client:
         service_account_name = f"{service_account_name}-role"
 
         gcp_region_client.remove_role(service_account_name)
+
+    def _remove_shared_aws_resource(self, aws_region_client: AWSRemoteClient) -> None:
+        if self._workflow_id is None:
+            return
+
+        ecr_name = self._workflow_id.replace(".", "_")
+        print(f"removing shared ecr repository {ecr_name}")
+        aws_region_client.remove_ecr_repository(ecr_name)

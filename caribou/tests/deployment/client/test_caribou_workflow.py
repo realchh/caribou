@@ -1370,7 +1370,7 @@ class TestCaribouWorkflow(unittest.TestCase):
 
         # Wrap methods with call tracking
         self.workflow.get_successor_instance_name = track_calls("get_successor_instance_name")(
-            Mock(return_value=("successor", {}))
+            Mock(return_value=("successor", {}, "successor_function_name"))
         )
         self.workflow.get_successor_workflow_placement_decision = track_calls(
             "get_successor_workflow_placement_decision"
