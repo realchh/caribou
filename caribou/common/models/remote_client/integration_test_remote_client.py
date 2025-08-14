@@ -524,3 +524,6 @@ class IntegrationTestRemoteClient(RemoteClient):  # pylint: disable=too-many-pub
 
     def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         return False
+
+    def get_service_config(self, service_name: str, region: str) -> float:
+        return 1.0

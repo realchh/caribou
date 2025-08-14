@@ -1202,3 +1202,6 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         aligner: str | None = None,
     ) -> float | None:
         raise NotImplementedError
+
+    def get_service_config(self, service_name: str, region: str) -> float:
+        raise NotImplementedError()

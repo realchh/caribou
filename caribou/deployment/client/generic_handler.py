@@ -1,3 +1,4 @@
+import base64
 import importlib
 import json
 import logging
@@ -45,9 +46,9 @@ def _find_target_function(workflow: Any, target_name: Optional[str] = None) -> t
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     """
     Generic Lambda handler that dynamically routes to the appropriate function based on the target in the payload.
-    Handles both direct invocations and SNS-triggered invocations.
+    Handles both AWS (in direct invocations and SNS-triggered invocations) and GCP (Pub/Sub triggered invocations).
 
-    The expected payload structure (after SNS unwrapping if needed):
+    The expected payload structure (after SNS or Pub/Sub unwrapping if needed):
     {
         "workflow_placement_decision": {...},
         "transmission_taint": "...",
@@ -56,12 +57,21 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         "payload": {...}  # Payload is at root level
     }
     """
+    print(f"event: {event}")
+    print(f"_context: {_context}")
     try:
-        # Handle SNS-triggered invocations
         if "Records" in event and len(event["Records"]) == 1 and "Sns" in event["Records"][0]:
+            # Handle SNS-triggered invocations
             sns_message = event["Records"][0]["Sns"]["Message"]
+            print("sns_message", sns_message)
             event = _parse_event(sns_message)
+        elif "@type" in event and event["@type"] == "type.googleapis.com/google.pubsub.v1.PubsubMessage":
+            # Handle Pub/Sub-triggered invocations
+            data = base64.b64decode(event["data"]).decode("utf-8")
+            print("data", data)
+            event = _parse_event(data)
         else:
+            # Han
             event = _parse_event(event)
 
         # Import and get workflow

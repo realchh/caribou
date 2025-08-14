@@ -171,3 +171,6 @@ class MockRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         pass
+
+    def get_service_config(self, service_name: str, region: str) -> float:
+        pass

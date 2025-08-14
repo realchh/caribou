@@ -300,3 +300,7 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         raise NotImplementedError()
+
+    @abstractmethod
+    def get_service_config(self, service_name: str, region: str) -> float:
+        raise NotImplementedError()

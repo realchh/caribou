@@ -146,11 +146,17 @@ class ExecutionData:  # pylint: disable=too-many-instance-attributes
 
         # vcpu ratio (assuming linear, intercept at 0 scaling)
         # for aws lambda https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html
-        # TODO: forgot about this
-        vcpu = total_memory / 1769
+        vcpu_count = self.lambda_insights.get("vcpu_count", None)
 
-        # Calculate the cpu utilization
-        cpu_utilization = cpu_total_time / (self.longest_duration * vcpu)
+        if vcpu_count is not None:
+            # GCP: Use explicit vCPU count
+            cpu_utilization = cpu_total_time / (self.longest_duration * vcpu_count)
+        else:
+            # AWS: Use memory-based calculation
+            total_memory = self.lambda_insights.get("total_memory", 0.0)
+            vcpu = total_memory / 1769
+            # Calculate the cpu utilization
+            cpu_utilization = cpu_total_time / (self.longest_duration * vcpu)
 
         return cpu_utilization
 

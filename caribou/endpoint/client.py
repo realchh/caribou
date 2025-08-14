@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Optional, cast
 
 import botocore.exceptions
-import google.api_core.exceptions
+from google.api_core import exceptions as google_api_exceptions
 
 from caribou.common.constants import (
     CARIBOU_WORKFLOW_IMAGES_TABLE,
@@ -276,8 +276,10 @@ class Client:
 
         for function_physical_instance, provider_region in deployed_region.items():
             deploy_region: dict[str, str] = provider_region["deploy_region"]
-            print(f"Removing function {function_physical_instance} from provider {deploy_region.get("provider", "")}"
-                  f" in region {deploy_region.get("region", "")}")
+            print(
+                f"Removing function {function_physical_instance} from provider {deploy_region.get('provider', '')}"
+                f" in region {deploy_region.get('region', '')}"
+            )
             self._remove_function_instance(function_physical_instance, provider_region["deploy_region"])
 
             if deploy_region.get("provider") == Provider.GCP.value:
@@ -302,26 +304,6 @@ class Client:
         role_name = f"{identifier}-role"
         messaging_topic_name = f"{identifier}_messaging_topic"
         client = self._get_remote_client(provider, region)
-        # print(f"removing function {function_instance} from provider {provider} in region {region}")
-        # print(f"role name {role_name}, messaging topic name {messaging_topic_name}, identifier {identifier}")
-        # Remove the ECR repository
-        # try:
-        #     if isinstance(client, AWSRemoteClient):
-        #         ecr_identifier = "-".join(identifier.split("-")[0:2])
-        #         print(f"removing ecr repository {identifier}")
-        #         client.remove_ecr_repository(identifier)
-        # except RuntimeError as e:
-        #     print(f"Could not remove ecr repository {identifier}: {str(e)}")
-        # except botocore.exceptions.ClientError as e:
-        #     print(f"Could not remove ecr repository {identifier}: {str(e)}")
-
-        try:
-            if isinstance(client, GCPRemoteClient):
-                client.remove_artifact_registry_repository(identifier)
-        except RuntimeError as e:
-            print(f"Could not remove artifact registry repository {identifier}: {str(e)}")
-        except google.api_core.exceptions.GoogleAPICallError as e:
-            print(f"Could not remove artifact registry repository {identifier}: {str(e)}")
 
         # Remove the SNS messaging topic and all associated subscriptions
         try:
@@ -350,21 +332,33 @@ class Client:
         print(f"Removed function {function_instance} from provider {provider} in region {region}")
 
     def _remove_shared_gcp_resource(self, gcp_region_client: GCPRemoteClient) -> None:
+        # GCP has two shared resources per workflow: service account and artifact registry repository
         if self._workflow_id is None:
             return
 
         workflow_name = self._workflow_id.split("-")[0]
         workflow_version = self._workflow_id.split("-")[1]
 
-        service_account_name = generate_workflow_service_account_id(workflow_name, workflow_version)
-        service_account_name = f"{service_account_name}-role"
+        service_account_id = generate_workflow_service_account_id(workflow_name, workflow_version)
+        service_account_name = f"{service_account_id}-role"
 
-        gcp_region_client.remove_role(service_account_name)
+        try:
+            print(f"Removing shared service account {service_account_name}")
+            gcp_region_client.remove_role(service_account_name)
+        except RuntimeError:
+            print(f"Role {service_account_name} not found. Maybe it was already removed.")
+
+        try:
+            print(f"Removing shared Artifact Registry Repository {service_account_id}")
+            gcp_region_client.remove_artifact_registry_repository(service_account_id)
+        except google_api_exceptions.NotFound:
+            print(f"Repository {service_account_id} not found. Maybe it was already removed.")
 
     def _remove_shared_aws_resource(self, aws_region_client: AWSRemoteClient) -> None:
+        # AWS has one shared resource per workflow: ECR repository
         if self._workflow_id is None:
             return
 
         ecr_name = self._workflow_id.replace(".", "_")
-        print(f"removing shared ecr repository {ecr_name}")
+        print(f"Removing shared ECR repository {ecr_name}")
         aws_region_client.remove_ecr_repository(ecr_name)
