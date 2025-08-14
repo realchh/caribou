@@ -537,10 +537,6 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         workflow_id = "-".join(role_identifier.split("-")[:-2])
         deployed_image_uri = self._get_deployed_image_uri(function_name)
 
-        print(f"workflow_id: {workflow_id}")
-        print(f"role identifier: {role_identifier}")
-        print(f"function_name: {function_name}")
-        print(f"deployed_image_uri: {deployed_image_uri}")
         if len(deployed_image_uri) > 0:
             image_uri = self._copy_image_if_not_exists(deployed_image_uri)
         else:
@@ -556,7 +552,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     zip_ref.extractall(tmpdirname)
 
                 # Step 2: Create a Dockerfile in the temporary directory
-                dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
+                dockerfile_content = self._generate_dockerfile(additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 
@@ -670,6 +666,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         document.set({"value": image_name}, merge=True)
 
     def _copy_image_if_not_exists(self, deployed_image_uri: str) -> str:
+        # TODO: remove comments
         print(f"checking image {deployed_image_uri}")
         # format = us-east1-docker.pkg.dev/caribou-460422/caribou/dna-tion-0-0-3-34602bd34:latest
         original_region = "-".join(deployed_image_uri.split("-")[:2])
@@ -748,18 +745,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return image_uri
 
-    def _generate_dockerfile(self, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
+    def _generate_dockerfile(self, additional_docker_commands: Optional[list[str]]) -> str:
         run_command = ""
         if additional_docker_commands and len(additional_docker_commands) > 0:
             run_command += " && ".join(additional_docker_commands)
         if len(run_command) > 0:
             run_command = f"RUN {run_command}"
-
-        source_file = handler.split(".")[0] + ".py"
-        target_function = handler.split(".")[-1]
-
-        print("source_file: ", source_file)
-        print("target_function: ", target_function)
 
         source_file = "generic_handler.py"
         target_function = "lambda_handler"
@@ -876,7 +867,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     zip_ref.extractall(tmpdirname)
 
-                dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
+                dockerfile_content = self._generate_dockerfile(additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 

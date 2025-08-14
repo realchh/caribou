@@ -315,6 +315,11 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             logger.info("Image already exists in the %s region, skipping copy", new_region)
             return deployed_image_uri
         new_image_name = original_image_name.replace(original_region, new_region)
+        target_image_uri = deployed_image_uri.replace(original_region, new_region)
+
+        if self._image_exists_in_ecr(new_image_name):
+            logger.info("Image already exists in the %s region, skipping copy", new_region)
+            return target_image_uri
 
         # Assume AWS CLI is configured. Customize these commands based on your AWS setup.
         repository_name = new_image_name.split(":")[0]
@@ -374,6 +379,23 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             except subprocess.CalledProcessError as e:
                 logger.error("Failed to copy Docker image %s. Error: %s", new_image_uri, e)
             return new_image_uri
+
+    def _image_exists_in_ecr(self, image_uri: str) -> bool:
+        ecr_client = self._client("ecr")
+        try:
+            repository_name = image_uri.split("/")[1].split(":")[0]
+            image_tag = image_uri.split(":")[-1] if ":" in image_uri else "latest"
+
+            ecr_client.describe_images(
+                repositoryName=repository_name,
+                imageIds=[{'imageTag': image_tag}]
+            )
+            return True
+        except ecr_client.exceptions.ImageNotFoundException:
+            return False
+        except Exception as e:
+            logger.warning("Error checking if image exists: %s", e)
+            return False  # Assume it doesn't exist and proceed with copy
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
         workflow_instance_id = "-".join(function_name.split("-")[0:2])

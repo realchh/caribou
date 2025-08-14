@@ -288,12 +288,18 @@ class Client:
                 aws_regions.add(deploy_region["region"])
 
         if gcp_regions:
-            gcp_region = next(iter(gcp_regions))
-            gcp_region_client = self._get_remote_client(Provider.GCP.value, gcp_region)
-            self._remove_shared_gcp_resource(cast(GCPRemoteClient, gcp_region_client))
+            service_account_removed: bool = False
+            for gcp_region in gcp_regions:
+                gcp_region_client = self._get_remote_client(Provider.GCP.value, gcp_region)
+                print(f"removing shared gcp resources in region {gcp_region}")
+                if not service_account_removed:
+                    self._remove_shared_gcp_service_account(cast(GCPRemoteClient, gcp_region_client))
+                    service_account_removed = True
+                self._remove_shared_gcp_artifact_registry_repo(cast(GCPRemoteClient, gcp_region_client))
 
         if aws_regions:
             for region in aws_regions:
+                print(f"removing shared aws resources in region {gcp_region}")
                 aws_region_client = self._get_remote_client(Provider.AWS.value, region)
                 self._remove_shared_aws_resource(cast(AWSRemoteClient, aws_region_client))
 
@@ -331,7 +337,7 @@ class Client:
 
         print(f"Removed function {function_instance} from provider {provider} in region {region}")
 
-    def _remove_shared_gcp_resource(self, gcp_region_client: GCPRemoteClient) -> None:
+    def _remove_shared_gcp_service_account(self, gcp_region_client: GCPRemoteClient) -> None:
         # GCP has two shared resources per workflow: service account and artifact registry repository
         if self._workflow_id is None:
             return
@@ -348,6 +354,16 @@ class Client:
         except RuntimeError:
             print(f"Role {service_account_name} not found. Maybe it was already removed.")
 
+    def _remove_shared_gcp_artifact_registry_repo(self, gcp_region_client: GCPRemoteClient) -> None:
+        # GCP has two shared resources per workflow: service account and artifact registry repository
+        if self._workflow_id is None:
+            return
+
+        workflow_name = self._workflow_id.split("-")[0]
+        workflow_version = self._workflow_id.split("-")[1]
+
+        service_account_id = generate_workflow_service_account_id(workflow_name, workflow_version)
+
         try:
             print(f"Removing shared Artifact Registry Repository {service_account_id}")
             gcp_region_client.remove_artifact_registry_repository(service_account_id)
@@ -355,7 +371,7 @@ class Client:
             print(f"Repository {service_account_id} not found. Maybe it was already removed.")
 
     def _remove_shared_aws_resource(self, aws_region_client: AWSRemoteClient) -> None:
-        # AWS has one shared resource per workflow: ECR repository
+        # AWS has one shared resource per workflow per region: ECR repository
         if self._workflow_id is None:
             return
 

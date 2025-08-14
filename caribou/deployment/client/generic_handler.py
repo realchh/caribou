@@ -78,13 +78,19 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         app = importlib.import_module("app")
         workflow = app.workflow
 
-        # Get payload and target function
-        payload = _get_payload(event)
+        # # Get payload and target function
+        # payload = _get_payload(event)
         target_function_name = event.get("target") if isinstance(event, dict) else None
         target_function, func_name = _find_target_function(workflow, target_function_name)
+        #
+        # _, _ = payload, func_name  # Unused variables, for now disabled to run tests
+        # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098651221
+        # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098652506
+        # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098804117
+        # It seems like the call will go to caribou_workflow.py, which will then parse the event again.
 
-        _, _ = payload, func_name  # Unused variables, for now disabled to run tests
-
+        print(f"target_function_name: {target_function_name}")
+        print(f"function_name: {func_name}")
         # Call the target function
         result = target_function(event)
 
