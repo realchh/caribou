@@ -128,7 +128,7 @@ class ExecutionData:  # pylint: disable=too-many-instance-attributes
     def cpu_utilization(self) -> Optional[float]:
         if self.lambda_insights is None:
             return None
-
+        print(self.lambda_insights)
         cpu_total_time = self.lambda_insights.get("cpu_total_time", None)
         if cpu_total_time is None:
             return None
