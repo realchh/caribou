@@ -386,14 +386,14 @@ class AWSRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             repository_name = image_uri.split("/")[1].split(":")[0]
             image_tag = image_uri.split(":")[-1] if ":" in image_uri else "latest"
 
-            ecr_client.describe_images(
-                repositoryName=repository_name,
-                imageIds=[{'imageTag': image_tag}]
-            )
+            ecr_client.describe_images(repositoryName=repository_name, imageIds=[{"imageTag": image_tag}])
             return True
-        except ecr_client.exceptions.ImageNotFoundException:
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ImageNotFoundException":
+                return False
+            logger.warning("Error checking if image exists: %s", e)
             return False
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning("Error checking if image exists: %s", e)
             return False  # Assume it doesn't exist and proceed with copy
 

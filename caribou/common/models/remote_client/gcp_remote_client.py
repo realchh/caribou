@@ -666,22 +666,14 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         document.set({"value": image_name}, merge=True)
 
     def _copy_image_if_not_exists(self, deployed_image_uri: str) -> str:
-        # TODO: remove comments
-        print(f"checking image {deployed_image_uri}")
-        # format = us-east1-docker.pkg.dev/caribou-460422/caribou/dna-tion-0-0-3-34602bd34:latest
         original_region = "-".join(deployed_image_uri.split("-")[:2])
-        # us-east1
-
         new_region = self._region
-        # northamerica-northeast1
 
         if new_region is None:
             raise RuntimeError("No remote client region specified. This should be impossible")
 
         original_image_name = deployed_image_uri.split("/")[-1]
-        # dna-tion-0-0-3-34602bd34:latest
         new_image_name = original_image_name.replace(original_region, new_region)
-        # format = northamerica-northeast1-docker.pkg.dev/caribou-460422/caribou/dna-tion-0-0-3-34602bd34:latest
 
         repo_id = "caribou"  # Base artifact registry repo to hold the docker images used for deployment
         self._ensure_repository(repo_id)

@@ -729,52 +729,42 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         # Mock subprocess calls (gcloud auth and gcrane cp)
         mock_subprocess.return_value = None
 
-        # Mock the region/country abbreviation functions
-        with patch("caribou.common.models.remote_client.gcp_remote_client.get_country_abbreviation") as mock_country:
-            with patch("caribou.common.models.remote_client.gcp_remote_client.get_region_abbreviation") as mock_region:
-                mock_country.return_value = "us"
-                mock_region.return_value = "ce"
+        # Mock the artifact registry client and its methods
+        mock_images_response = []  # Empty list means image doesn't exist
+        self.gcp_client._artifact_registry_client.list_docker_images.return_value = mock_images_response
 
-                with patch("tempfile.TemporaryDirectory") as mock_tempdir:
-                    mock_temp_context = MagicMock()
-                    mock_temp_context.__enter__.return_value = "/tmp/test"
-                    mock_temp_context.__exit__.return_value = None
-                    mock_tempdir.return_value = mock_temp_context
+        result = self.gcp_client._copy_image_if_not_exists(deployed_image_uri)
 
-                    result = self.gcp_client._copy_image_to_region(deployed_image_uri)
+        # Verify the result
+        expected_result = (
+            f"{self.gcp_client._region}-docker.pkg.dev/{self.gcp_client._project_id}/caribou/test-image:latest"
+        )
+        self.assertEqual(result, expected_result)
 
-        # The expected result should reflect the region code replacement logic
-        # Based on the error output, it seems like the region gets replaced in the image name
-        # Let's just verify that the result contains the expected project and repository structure
-        self.assertIn(f"{self.region}-docker.pkg.dev", result)
-        self.assertIn(f"{self.project_id}/caribou", result)
-
-        # Verify gcrane cp was called (exact URI may vary due to region translation)
-        self.assertTrue(any("gcrane" in str(call) for call in mock_subprocess.call_args_list))
+        # Verify subprocess calls
+        mock_subprocess.assert_called()
 
     def test_generate_dockerfile(self):
         """Test _generate_dockerfile with various configurations"""
-        handler = "main.handler"
         additional_docker_commands = ["pip install extra-package", "apt-get install -y curl"]
 
-        dockerfile = self.gcp_client._generate_dockerfile(handler, additional_docker_commands)
+        dockerfile = self.gcp_client._generate_dockerfile(additional_docker_commands)
 
         self.assertIn("FROM", dockerfile)
         self.assertIn("pip install extra-package && apt-get install -y curl", dockerfile)
-        self.assertIn("main.py", dockerfile)
-        self.assertIn("handler", dockerfile)
+        self.assertIn("generic_handler.py", dockerfile)
+        self.assertIn("lambda_handler", dockerfile)
         self.assertIn("functions-framework", dockerfile)
 
     def test_generate_dockerfile_no_additional_commands(self):
         """Test _generate_dockerfile without additional commands"""
-        handler = "app.main"
-
-        dockerfile = self.gcp_client._generate_dockerfile(handler, None)
+        dockerfile = self.gcp_client._generate_dockerfile(None)
 
         self.assertIn("FROM", dockerfile)
         self.assertNotIn("RUN pip install extra-package", dockerfile)
-        self.assertIn("app.py", dockerfile)
-        self.assertIn("main", dockerfile)
+        self.assertIn("generic_handler.py", dockerfile)
+        self.assertIn("lambda_handler", dockerfile)
+        self.assertIn("functions-framework", dockerfile)
 
     @patch("subprocess.run")
     def test_upload_image_to_artifact_registry(self, mock_subprocess):
@@ -1824,8 +1814,7 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         # Pre-populate cache with correct key structure
         # The actual implementation uses the full function name as workflow_id initially
         workflow_id = function_name  # Use full name as key
-        function_simple = ""  # Empty string based on the parsing logic
-        self.gcp_client._workflow_image_cache[workflow_id] = {function_simple: image_uri}
+        self.gcp_client._workflow_image_cache[workflow_id] = {"value": image_uri}
 
         result = self.gcp_client._get_deployed_image_uri(function_name)
 
@@ -1843,7 +1832,7 @@ class TestGCPRemoteClientExtended(unittest.TestCase):
         mock_snap = MagicMock()
         mock_snap.exists = True
         # The function name parsing extracts empty string in this case
-        mock_snap.to_dict.return_value = {"": image_uri}  # Use empty string as key
+        mock_snap.to_dict.return_value = {"value": image_uri}  # Use empty string as key
 
         mock_document = MagicMock()
         mock_document.get.return_value = mock_snap
@@ -2043,7 +2032,8 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         """Test complete function creation workflow from zip to deployed service"""
         # Setup parameters
         function_name = "integration-test-function"
-        role_identifier = "test-sa@test-project.iam.gserviceaccount.com"
+        workflow_name = "test"
+        role_identifier = f"{workflow_name}-sa@test-project.iam.gserviceaccount.com"
         zip_contents = b"fake zip contents"
         runtime = "python312"
         handler = "main.handler"
@@ -2073,7 +2063,7 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
         self.gcp_client._ensure_repository = MagicMock(return_value="repo-path")
 
         # Mock image upload
-        expected_image_uri = f"{self.region}-docker.pkg.dev/{self.project_id}/caribou/{function_name.lower()}:latest"
+        expected_image_uri = f"{self.region}-docker.pkg.dev/{self.project_id}/caribou/{workflow_name}:latest"
 
         # Mock image storage
         self.gcp_client._store_deployed_image_uri = MagicMock()
@@ -2118,13 +2108,13 @@ class TestGCPRemoteClientIntegration(unittest.TestCase):
                     "--platform",
                     "linux/amd64",
                     "-t",
-                    f"{function_name.lower()}:latest",
+                    f"{workflow_name}:latest",  # Use function_name instead of hardcoded "test"
                     "/tmp/integration_test",
                 ],
                 check=True,
             ),
             call(["gcloud", "auth", "configure-docker", f"{self.region}-docker.pkg.dev", "--quiet"], check=True),
-            call(["docker", "tag", f"{function_name.lower()}:latest", expected_image_uri], check=True),
+            call(["docker", "tag", f"{workflow_name}:latest", expected_image_uri], check=True),
             call(["docker", "push", expected_image_uri], check=True),
         ]
         mock_subprocess.assert_has_calls(expected_docker_calls, any_order=True)

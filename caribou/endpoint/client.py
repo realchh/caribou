@@ -299,7 +299,7 @@ class Client:
 
         if aws_regions:
             for region in aws_regions:
-                print(f"removing shared aws resources in region {gcp_region}")
+                print(f"Removing shared aws resources in region {region}")
                 aws_region_client = self._get_remote_client(Provider.AWS.value, region)
                 self._remove_shared_aws_resource(cast(AWSRemoteClient, aws_region_client))
 

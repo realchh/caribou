@@ -1022,16 +1022,35 @@ class TestAWSRemoteClient(unittest.TestCase):
         # Mocking the scenario where the image is copied successfully
         mock_ecr_client = MagicMock()
         mock_sts_client = MagicMock()
-        mock_client.side_effect = [mock_ecr_client, mock_sts_client]
+
+        # Mock the _client method to return the appropriate client based on service name
+        def mock_client_side_effect(service_name):
+            if service_name == "ecr":
+                return mock_ecr_client
+            elif service_name == "sts":
+                return mock_sts_client
+            else:
+                return MagicMock()
+
+        mock_client.side_effect = mock_client_side_effect
 
         mock_ecr_client.meta.region_name = "region1"
+
+        # Mock the image_exists_in_ecr method to return False (image doesn't exist)
+        mock_ecr_client.describe_images.side_effect = ClientError(
+            error_response={"Error": {"Code": "ImageNotFoundException"}}, operation_name="DescribeImages"
+        )
+
+        # Mock create_repository to handle RepositoryAlreadyExistsException
+        mock_ecr_client.exceptions.RepositoryAlreadyExistsException = Exception
+        mock_ecr_client.create_repository.return_value = {}
 
         client = AWSRemoteClient("region1")
 
         # Define the input
         deployed_image_uri = "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-web-app:latest"
 
-        # Mock the return value of get_caller_identity
+        # Mock the STS client to return the correct account ID
         mock_sts_client.get_caller_identity.return_value = {"Account": "123456789012"}
 
         # Mock the return value of check_output

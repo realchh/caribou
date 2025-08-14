@@ -30,16 +30,16 @@ def _get_payload(event: Dict[str, Any]) -> Any:
     return payload
 
 
-def _find_target_function(workflow: Any, target_name: Optional[str] = None) -> tuple[Any, str]:
+def _find_target_function(workflow: Any, target_name: Optional[str] = None) -> Any:
     """Find the target function in the workflow."""
     if target_name:
-        for func_name, caribou_func in workflow.functions.items():
+        for _, caribou_func in workflow.functions.items():
             if caribou_func.name == target_name:
-                return caribou_func.wrapped_function, func_name
+                return caribou_func.wrapped_function
     else:
-        for func_name, caribou_func in workflow.functions.items():
+        for _, caribou_func in workflow.functions.items():
             if caribou_func.entry_point:
-                return caribou_func.wrapped_function, caribou_func.name
+                return caribou_func.wrapped_function
     raise ValueError(f"Function {target_name} not found in workflow")
 
 
@@ -57,18 +57,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         "payload": {...}  # Payload is at root level
     }
     """
-    print(f"event: {event}")
-    print(f"_context: {_context}")
     try:
         if "Records" in event and len(event["Records"]) == 1 and "Sns" in event["Records"][0]:
             # Handle SNS-triggered invocations
             sns_message = event["Records"][0]["Sns"]["Message"]
-            print("sns_message", sns_message)
             event = _parse_event(sns_message)
         elif "@type" in event and event["@type"] == "type.googleapis.com/google.pubsub.v1.PubsubMessage":
             # Handle Pub/Sub-triggered invocations
             data = base64.b64decode(event["data"]).decode("utf-8")
-            print("data", data)
             event = _parse_event(data)
         else:
             # Han
@@ -81,7 +77,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         # # Get payload and target function
         # payload = _get_payload(event)
         target_function_name = event.get("target") if isinstance(event, dict) else None
-        target_function, func_name = _find_target_function(workflow, target_function_name)
+        target_function = _find_target_function(workflow, target_function_name)
         #
         # _, _ = payload, func_name  # Unused variables, for now disabled to run tests
         # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098651221
@@ -89,8 +85,6 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098804117
         # It seems like the call will go to caribou_workflow.py, which will then parse the event again.
 
-        print(f"target_function_name: {target_function_name}")
-        print(f"function_name: {func_name}")
         # Call the target function
         result = target_function(event)
 
