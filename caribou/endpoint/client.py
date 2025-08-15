@@ -69,6 +69,11 @@ class Client:
         wpd_data_size = len(raw_wpd.encode("utf-8")) / (1024**3)
         workflow_placement_decision = json.loads(raw_wpd)
 
+        # Get the entry point name
+        workflow_instances = workflow_placement_decision["instances"]
+        entry_point_full_instance_name = next(iter(workflow_instances))
+        entry_point_instance_name = entry_point_full_instance_name.split(":")[0]
+
         send_to_home_region = random.random() < self._home_region_threshold
 
         workflow_placement_decision["time_key"] = self._get_time_key(workflow_placement_decision)
@@ -90,6 +95,7 @@ class Client:
             "payload": input_data,
             "time_request_sent": current_time,
             "workflow_placement_decision": workflow_placement_decision,
+            "target": entry_point_instance_name,
             "number_of_hops_from_client_request": 0,
             "permit_redirection": False,  # We don't want to redirect the request.
             "redirected": False,

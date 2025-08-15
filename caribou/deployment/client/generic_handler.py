@@ -36,11 +36,10 @@ def _find_target_function(workflow: Any, target_name: Optional[str] = None) -> A
         for _, caribou_func in workflow.functions.items():
             if caribou_func.name == target_name:
                 return caribou_func.wrapped_function
-    else:
-        for _, caribou_func in workflow.functions.items():
-            if caribou_func.entry_point:
-                return caribou_func.wrapped_function
-    raise ValueError(f"Function {target_name} not found in workflow")
+
+        raise ValueError(f"Function {target_name} not found in workflow")
+
+    raise ValueError("Target function name not provided")
 
 
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -67,7 +66,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             data = base64.b64decode(event["data"]).decode("utf-8")
             event = _parse_event(data)
         else:
-            # Han
+            # Handle direct invocations
             event = _parse_event(event)
 
         # Import and get workflow
@@ -78,12 +77,6 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         # payload = _get_payload(event)
         target_function_name = event.get("target") if isinstance(event, dict) else None
         target_function = _find_target_function(workflow, target_function_name)
-        #
-        # _, _ = payload, func_name  # Unused variables, for now disabled to run tests
-        # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098651221
-        # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098652506
-        # https://github.com/ubc-cirrus-lab/caribou/pull/346#discussion_r2098804117
-        # It seems like the call will go to caribou_workflow.py, which will then parse the event again.
 
         # Call the target function
         result = target_function(event)
