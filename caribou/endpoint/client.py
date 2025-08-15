@@ -386,4 +386,7 @@ class Client:
 
         ecr_name = self._workflow_id.replace(".", "_")
         print(f"Removing shared ECR repository {ecr_name}")
-        aws_region_client.remove_ecr_repository(ecr_name)
+        try:
+            aws_region_client.remove_ecr_repository(ecr_name)
+        except Exception as e:  # pylint: disable=broad-except
+            print(f"Error deleting repository {ecr_name}. Maybe it was already removed. {e}")
