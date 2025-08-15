@@ -84,6 +84,9 @@ class Client:
             workflow_placement_decision, send_to_home_region
         )
 
+        if provider == Provider.AWS.value:
+            entry_point_instance_name = entry_point_instance_name.split("-")[-1]
+
         workflow_placement_decision["send_to_home_region"] = send_to_home_region
 
         run_id = uuid.uuid4().hex
