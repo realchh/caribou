@@ -1468,6 +1468,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return None
 
+    def remove_remote_cli_topic(self, topic_name: str) -> None:
+        topic_identifier = f"projects/{self._project_id}/topics/{topic_name}"
+        self.remove_messaging_topic(topic_identifier)
+
     def remove_messaging_topic(self, topic_identifier: str) -> None:
         publisher_client = self._pubsub_publisher_client
         subscriber_client = self._pubsub_subscriber_client

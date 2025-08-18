@@ -153,7 +153,6 @@ class ExecutionData:  # pylint: disable=too-many-instance-attributes
             cpu_utilization = cpu_total_time / (self.longest_duration * vcpu_count)
         else:
             # AWS: Use memory-based calculation
-            total_memory = self.lambda_insights.get("total_memory", 0.0)
             vcpu = total_memory / 1769
             # Calculate the cpu utilization
             cpu_utilization = cpu_total_time / (self.longest_duration * vcpu)
