@@ -201,7 +201,8 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 self._insights_logs[request_id]["init_duration_s"] = float(startup_latency_str.rstrip("s"))
 
             resource_labels = log_dict.get("resource", {}).get("labels", {})
-
+            service_name = resource_labels.get("service_name", None)
+            location = resource_labels.get("location", None)
             revision_name = resource_labels.get("revision_name", None)
             timestamp = log_dict.get("timestamp", None)
 
@@ -217,6 +218,11 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
                 )
                 if cpu_total_time:
                     self._insights_logs[request_id]["cpu_total_time"] = cpu_total_time
+
+                # Fetch vCPU Count
+                vcpu_count = self._get_revision_vcpu_config(service_name, location, remote_client)
+                if vcpu_count:
+                    self._insights_logs[request_id]["vcpu_count"] = vcpu_count
 
                 # Fetch Memory Utilization
                 memory_utilization = remote_client.query_metric(
@@ -1185,3 +1191,13 @@ class LogSyncWorkflow:  # pylint: disable=too-many-instance-attributes
 
     def _does_field_exist(self, log_entry: str, regex: str) -> bool:
         return bool(re.search(regex, log_entry))
+
+    def _get_revision_vcpu_config(
+        self, revision_name: str, location: str, remote_client: RemoteClient
+    ) -> Optional[float]:
+        """Extract vCPU count from Cloud Run revision"""
+        try:
+            return remote_client.get_service_config(revision_name, location)
+        except Exception as e:  # pylint: disable=broad-except
+            print(f"Error getting revision CPU config: {e}")
+            return None

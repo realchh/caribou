@@ -46,12 +46,7 @@ from caribou.common.constants import (
     SYNC_TABLE_TTL,
 )
 from caribou.common.models.remote_client.remote_client import RemoteClient
-from caribou.common.utils import (
-    compress_json_str,
-    decompress_json_str,
-    get_country_abbreviation,
-    get_region_abbreviation,
-)
+from caribou.common.utils import compress_json_str, decompress_json_str
 from caribou.deployment.common.deploy.models.resource import Resource
 
 logger = logging.getLogger(__name__)
@@ -539,9 +534,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         image_uri: str
+        workflow_id = "-".join(role_identifier.split("-")[:-2])
         deployed_image_uri = self._get_deployed_image_uri(function_name)
+
         if len(deployed_image_uri) > 0:
-            image_uri = self._copy_image_to_region(deployed_image_uri)
+            image_uri = self._copy_image_if_not_exists(deployed_image_uri)
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function creation")
@@ -555,12 +552,12 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                     zip_ref.extractall(tmpdirname)
 
                 # Step 2: Create a Dockerfile in the temporary directory
-                dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
+                dockerfile_content = self._generate_dockerfile(additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 
                 # Step 3: Build the Docker Image
-                image_name = f"{function_name.lower()}:latest"
+                image_name = f"{workflow_id.lower()}:latest"
                 self._build_docker_image(tmpdirname, image_name)
 
                 # Step 4: Upload the Image to Artifact Registry
@@ -658,34 +655,24 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def _store_deployed_image_uri(self, function_name: str, image_name: str) -> None:
         workflow_instance_id = "-".join(function_name.split("-")[0:5])
-        function_name_simple = function_name[len(workflow_instance_id) + 1 :]
-        function_name_simple = "-".join(function_name_simple.split("-")[0:3])
 
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 
-        self._workflow_image_cache[workflow_instance_id].update({function_name_simple: image_name})
+        self._workflow_image_cache[workflow_instance_id]["value"] = image_name
 
         client = self._firestore_client
         document = client.collection(CARIBOU_WORKFLOW_IMAGES_TABLE).document(workflow_instance_id)
-        document.set({function_name_simple: image_name}, merge=True)
+        document.set({"value": image_name}, merge=True)
 
-    def _copy_image_to_region(self, deployed_image_uri: str) -> str:
-        parts = deployed_image_uri.split("/")
-        original_image_name = parts[-1]
-        original_region = "-".join(original_image_name.split("-")[8:10])
-
+    def _copy_image_if_not_exists(self, deployed_image_uri: str) -> str:
+        original_region = "-".join(deployed_image_uri.split("-")[:2])
         new_region = self._region
 
         if new_region is None:
             raise RuntimeError("No remote client region specified. This should be impossible")
 
-        new_region_country = new_region.split("-")[0]
-        new_region_country = get_country_abbreviation(new_region_country)
-        new_region_region = new_region.split("-")[1]
-        new_region_region = get_region_abbreviation(new_region_region)
-
-        new_region = f"{new_region_country}-{new_region_region}"
+        original_image_name = deployed_image_uri.split("/")[-1]
         new_image_name = original_image_name.replace(original_region, new_region)
 
         repo_id = "caribou"  # Base artifact registry repo to hold the docker images used for deployment
@@ -697,6 +684,21 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         original_ecr_registry = f"{original_region}-docker.pkg.dev"
 
+        client = self._artifact_registry_client
+
+        parent = f"projects/{self._project_id}/locations/{self._region}/repositories/{repo_id}"
+
+        # Extract image name without tag for filtering
+        image_name_without_tag = new_image_name.split(":")[0]
+
+        # List images and check if our image exists
+        images = client.list_docker_images(parent=parent)
+        for image in images:
+            if image_name_without_tag in image.name:
+                print(f"Image {new_image_uri} already exists")
+                return new_image_uri
+
+        # Image doesn't exist, need to copy
         # Use /tmp directory which is writable in Cloud Run
         with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
             print(f"Using crane to copy image from {original_ecr_registry} to {host}")
@@ -713,12 +715,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
     def _get_deployed_image_uri(self, function_name: str) -> str:
         workflow_instance_id = "-".join(function_name.split("-")[0:5])
-        function_name_simple = function_name[len(workflow_instance_id) + 1 :]
-        function_name_simple = "-".join(function_name_simple.split("-")[0:3])
+
         if workflow_instance_id not in self._workflow_image_cache:
             self._workflow_image_cache[workflow_instance_id] = {}
 
-        cached = self._workflow_image_cache[workflow_instance_id].get(function_name_simple)
+        cached = self._workflow_image_cache[workflow_instance_id].get("value")
 
         if cached:
             return cached
@@ -731,20 +732,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             return ""
 
         document_dict = snap.to_dict() or {}
-        image_uri = document_dict.get(function_name_simple, "")
-        self._workflow_image_cache.setdefault(workflow_instance_id, {})[function_name_simple] = image_uri
+        image_uri = document_dict.get("value", "")
+        self._workflow_image_cache.setdefault(workflow_instance_id, {})["value"] = image_uri
 
         return image_uri
 
-    def _generate_dockerfile(self, handler: str, additional_docker_commands: Optional[list[str]]) -> str:
+    def _generate_dockerfile(self, additional_docker_commands: Optional[list[str]]) -> str:
         run_command = ""
         if additional_docker_commands and len(additional_docker_commands) > 0:
             run_command += " && ".join(additional_docker_commands)
         if len(run_command) > 0:
             run_command = f"RUN {run_command}"
 
-        source_file = handler.split(".")[0] + ".py"
-        target_function = handler.split(".")[-1]
+        source_file = "generic_handler.py"
+        target_function = "lambda_handler"
 
         return f"""
         FROM {self._region}-docker.pkg.dev/serverless-runtimes/google-22/runtimes/python312
@@ -762,6 +763,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         COPY app.py ./
         COPY src ./src
         COPY caribou ./caribou
+        COPY generic_handler.py ./
         CMD ["functions-framework", \
         "--source", "{source_file}", \
         "--target", "{target_function}", \
@@ -839,9 +841,11 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         additional_docker_commands: Optional[list[str]] = None,
     ) -> str:
         image_uri: str
+        workflow_id = "-".join(role_identifier.split("-")[:-2])
         deployed_image_uri = self._get_deployed_image_uri(function_name)
+
         if len(deployed_image_uri) > 0:
-            image_uri = self._copy_image_to_region(deployed_image_uri)
+            image_uri = self._copy_image_if_not_exists(deployed_image_uri)
         else:
             if zip_contents is None:
                 raise RuntimeError("No deployed image AND No deployment package provided for function update")
@@ -855,12 +859,13 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     zip_ref.extractall(tmpdirname)
 
-                dockerfile_content = self._generate_dockerfile(handler, additional_docker_commands)
+                dockerfile_content = self._generate_dockerfile(additional_docker_commands)
                 with open(os.path.join(tmpdirname, "Dockerfile"), "w", encoding="utf-8") as f_dockerfile:
                     f_dockerfile.write(dockerfile_content)
 
-                image_name = f"{function_name.lower()}:latest"
+                image_name = f"{workflow_id.lower()}:latest"
                 self._build_docker_image(tmpdirname, image_name)
+
                 image_uri = self._upload_image_to_artifact_registry(image_name)
                 self._store_deployed_image_uri(function_name, image_uri)
 
@@ -1463,6 +1468,10 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return None
 
+    def remove_remote_cli_topic(self, topic_name: str) -> None:
+        topic_identifier = f"projects/{self._project_id}/topics/{topic_name}"
+        self.remove_messaging_topic(topic_identifier)
+
     def remove_messaging_topic(self, topic_identifier: str) -> None:
         publisher_client = self._pubsub_publisher_client
         subscriber_client = self._pubsub_subscriber_client
@@ -1804,3 +1813,22 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         final_cpu = max(cpu or 1.0, min_cpu_required)
 
         return final_cpu
+
+    def get_service_config(self, service_name: str, region: str) -> float:
+        """Get Cloud Run service vCPU allocation for deployed functions"""
+        client = self._run_client
+        service_path = f"projects/{self._project_id}/locations/{region}/services/{service_name}"
+
+        service = client.get_service(name=service_path)
+        # Get vCPU from the service spec
+        container = service.template.containers[0]
+
+        vcpu = container.resources.limits.get("cpu", "1")
+
+        # Parse CPU value (could be '1', '2', '0.5', '1000m', etc.)
+        if vcpu.endswith("m"):
+            vcpu_count = float(vcpu[:-1]) / 1000  # Convert millicores to cores
+        else:
+            vcpu_count = float(vcpu)
+
+        return vcpu_count

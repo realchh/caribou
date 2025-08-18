@@ -214,9 +214,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
 
         current_instance_name = workflow_placement_decision["current_instance_name"]
 
-        successor_instance_name, successor_workflow_placement_decision_dictionary = self.get_successor_instance_name(
-            function, workflow_placement_decision
-        )
+        (
+            successor_instance_name,
+            successor_workflow_placement_decision_dictionary,
+            successor_function_name,
+        ) = self.get_successor_instance_name(function, workflow_placement_decision)
 
         if not hasattr(self._thread_local, "request_futures"):
             self._thread_local.request_futures = []
@@ -244,7 +246,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                     total_consumed_capacity,
                     sync_nodes_invoked_logs,
                 ) = self._inform_sync_node_of_conditional_non_execution(
-                    workflow_placement_decision, successor_instance_name, current_instance_name
+                    workflow_placement_decision, successor_instance_name, current_instance_name, successor_function_name
                 )
 
                 for sync_nodes_invoked_info in sync_nodes_invoked_logs:
@@ -348,13 +350,14 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             "number_of_hops_from_client_request": self._get_number_of_hops(),
         }
         alternative_json_payload: Optional[str] = None
+        payload_wrapper["target"] = successor_function_name
         if payload:
             # Get an version of the json payload without the "payload"
             # key to be used in case of a sync node
             alternative_json_payload = json.dumps(payload_wrapper, cls=CustomEncoder)
             payload_wrapper["payload"] = payload
-        json_payload = json.dumps(payload_wrapper, cls=CustomEncoder)
 
+        json_payload = json.dumps(payload_wrapper, cls=CustomEncoder)
         # Check the payload_size_byte size, if its too large, we need throw an error
         # We need to ensure that the payload that we send to SNS is below
         # 262,144 bytes (256 KB),
@@ -415,7 +418,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
             )
 
     def _inform_sync_node_of_conditional_non_execution(
-        self, workflow_placement_decision: dict[str, Any], successor_instance_name: str, current_instance_name: str
+        self,
+        workflow_placement_decision: dict[str, Any],
+        successor_instance_name: str,
+        current_instance_name: str,
+        successor_function_name: str,
     ) -> tuple[float, float, list[dict[str, Any]]]:
         # Record the total consumed write capacity
         total_consumed_capacity = 0.0
@@ -425,7 +432,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # If the successor is a sync node, we need to inform the platform that the function has finished.
         if successor_instance_name.split(":", maxsplit=2)[1] == "sync":
             response_size, consumed_capacity = self._inform_and_invoke_sync_node(
-                workflow_placement_decision, successor_instance_name, current_instance_name, sync_nodes_invoked_logs
+                workflow_placement_decision,
+                successor_instance_name,
+                current_instance_name,
+                sync_nodes_invoked_logs,
+                successor_function_name,
             )
 
             total_sync_data_response_size += response_size
@@ -438,8 +449,13 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 for predecessor_and_sync in instance.get("dependent_sync_predecessors", []):
                     predecessor = predecessor_and_sync[0]
                     sync_node = predecessor_and_sync[1]
+
                     response_size, consumed_capacity = self._inform_and_invoke_sync_node(
-                        workflow_placement_decision, sync_node, predecessor, sync_nodes_invoked_logs
+                        workflow_placement_decision,
+                        sync_node,
+                        predecessor,
+                        sync_nodes_invoked_logs,
+                        successor_function_name,
                     )
 
                     total_sync_data_response_size += response_size
@@ -455,6 +471,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         successor_instance_name: str,
         predecessor_instance_name: str,
         sync_nodes_invoked_logs: list[dict[str, Any]],
+        successor_function_name: str,
     ) -> tuple[float, float]:
         potential_call_start_time = datetime.now(GLOBAL_TIME_ZONE)
 
@@ -496,10 +513,12 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 "workflow_placement_decision": successor_workflow_placement_decision,
                 "transmission_taint": transmission_taint,
                 "number_of_hops_from_client_request": self._get_number_of_hops(),
+                "target": successor_function_name,
             }
             # payload_wrapper["workflow_placement_decision"] = successor_workflow_placement_decision
             # payload_wrapper["transmission_taint"] = transmission_taint
             json_payload = json.dumps(payload_wrapper)
+
             _, _, _, _, _ = self._get_remote_client(provider, region).invoke_function(
                 message=json_payload,
                 identifier=identifier,
@@ -566,7 +585,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         self,
         function: Callable[..., Any],
         workflow_placement_decision: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any], str]:
         # Get the name of the successor function
         successor_function_name = function.original_function.__name__  # type: ignore
 
@@ -585,7 +604,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         )
 
         # Return the next instance name and the successor workflow_placement decision
-        return next_instance_name, successor_workflow_placement_decision
+        return next_instance_name, successor_workflow_placement_decision, successor_function_name
 
     def get_successor_workflow_placement_decision_dictionary(
         self, workflow_placement_decision: dict[str, Any], next_instance_name: str
@@ -1015,6 +1034,11 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
                 environment_variables,
                 allow_placement_decision_override,
             )
+
+            # Set the wrapped function in the CaribouFunction object
+            caribou_func = self.functions[func.__name__]
+            caribou_func.set_wrapped_function(wrapper)
+
             return wrapper
 
         return _register_handler
@@ -1166,6 +1190,7 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         # Redirect the request to the desired provider and region
         redirect_payload: dict[str, Any] = {
             "payload": caribou_wrapper_argument.get("payload", {}),
+            "target": caribou_wrapper_argument.get("target", None),
             "workflow_placement_decision": workflow_placement_decision,
             "time_first_recieved": self._get_function_start_time().strftime(TIME_FORMAT),
             "transmission_taint": transmission_taint,
