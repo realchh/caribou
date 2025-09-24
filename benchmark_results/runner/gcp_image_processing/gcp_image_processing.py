@@ -7,8 +7,8 @@ import caribou.endpoint.client as client
 # --- Configuration ---
 WORKFLOW_ID = "image_processing-0.0.1"
 ARGUMENT_PAYLOAD = '{"image_name": "image_name.jpg", "desired_transformations": ["flip"]}'
-INTERVAL_SECONDS = 10
-RUN_DURATION_MINUTES = 1
+INTERVAL_SECONDS = 1
+RUN_DURATION_MINUTES = 10
 # -------------------
 
 if __name__ == "__main__":

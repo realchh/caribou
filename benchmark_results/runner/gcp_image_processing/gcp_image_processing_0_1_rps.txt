@@ -1,0 +1,639 @@
+/home/ubuntu/.cache/pypoetry/virtualenvs/caribou-MnaM4rVM-py3.12/bin/python /mnt/PycharmProjects/caribou/benchmark_results/runner/gcp_image_processing.py
+Starting workflow runner. Will run 'image_processing-0.0.1' every 10 seconds for 15 minutes.
+Press Ctrl+C to stop early.
+--- Tue Sep 23 21:55:00 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 18549788b2e04f948327c3ddd6efbfff
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:55:11 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: bd473dde02904b4ca1893546e2663033
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:55:21 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: 574b824c08a04efea6bb5352e80dde97
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:55:32 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 83eebd0c9f904be681e12ab6903cad0c
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:55:42 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 816c47a3723046bc9eca411018fef966
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:55:52 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e699e86e5b974df5adf515cbecf40ccd
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:56:03 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 5063219b84f74a62adab61ca5a4d4bb1
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:56:13 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 8fe7ccda9bcd499fad464fee651fc1d0
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:56:24 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: f9e759f8eaa54d27b5ad63ef39292e4a
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:56:34 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: ef186baf611f461d94b4941c606e9607
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:56:45 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 76d6db3ac66941359feb057fdfbc34e6
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:56:55 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: fcba86283e064f61b0f227041116245c
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:57:05 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 4263d53ce54f4a328775ed99b8b67abf
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:57:16 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 412317391ead475a9e42718e02873c31
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:57:26 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 79570837edd44b6eb6bd581b23babad5
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:57:37 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 8523f73e1d77411a83850d5eab9fba03
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:57:47 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 00dd6577eec34720b1c3d1e638889b55
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:57:57 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 63627d42ad18466fb6304c512b79d37b
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:58:08 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 7c2f494901c84d70befc05c9fc3255d0
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:58:18 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 9b0835b0740b4186be65c4ced2fd9e34
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:58:28 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: af9b0caa979146e59f9bcfcce5021786
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:58:39 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e85de2b71d914b629bdf03f7d7362167
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:58:49 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: bfe1c17d2fb344938a7e2aaaefa9b0a3
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:59:00 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: d8777a83370d4ebca580014c73364e2d
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:59:10 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 77fbd528865342c78b0331f869cbfe0e
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:59:21 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 9fd16eacb346461c9cecff9455124bfd
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:59:31 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 627b39930b4a4bd8b466f88b9a008536
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:59:42 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 68c7f5aac85d4ff394ed10a05197f0aa
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 21:59:52 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e8f51e0af8e84074ab42f18224d386fc
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:00:02 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e60c6d9e640248a4831c2d107773439f
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:00:13 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 62144f830a974896a180cad56bfa21bf
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:00:23 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 5ff858b7a89d4a07b284a98b939d8dcd
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:00:34 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: caa263e0ee494931bf88b1d1dd362209
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:00:44 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 5c288d6434f84f3ba54f5e70f02c3842
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:00:54 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: ac2e16979db24c7faf2588d6564d6d04
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:01:05 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: ba5d9a9b991148c39204f66fd6c89814
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:01:15 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: f3bedab9bd6c48e4883ae7bb19153493
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:01:26 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: cc4104a627ef43ea9c811ec42a7c1a2e
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:01:36 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 5b8d16f320f44dbfa4848e19e1cbb2cc
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:01:46 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: a821ed7b80f64749b46df0f0377c62d0
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:01:57 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 85cc34eebe32478f8e55b91fa7fd2442
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:02:07 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 35205bf5b3f44f0782cb727653bd1251
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:02:17 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e2bbe45027674b7db915632a69e65991
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:02:28 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: cb65c84e19a0463aacec6cd206f68c19
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:02:38 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 54d5fadb200b4282b0e4cf32e9bc4d39
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:02:49 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 1f92cf05fba74cb5ae3aa009dd630b29
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:02:59 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 8d1dc7fc15a24750bc23e7410ec4b4b5
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:03:10 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: 8f304ccc257c4ccf860ae46ddcde39bb
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:03:20 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 0e484bf4caf6432191423770b27bde40
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:03:30 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 5f95a0f38eb64810ad980442c9a03587
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:03:41 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e7f6024a8482403a9aee3a5b3fa27576
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:03:51 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 7ebc9da7d7f04e8f8a8728476e422d78
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:04:02 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: 52cb0bda5347445793e5c1e1d2ed677a
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:04:12 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: dbfd1d73f3134ecb95110f4fa9b0b5c9
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:04:23 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: d0ec17758cc7416bb9154a21b9fbb910
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:04:33 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 975f912dd6e84cb58bf8b41be7774af8
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:04:43 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e5894dc246f04adb8689a4f9d4fd67b5
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:04:54 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 1b9e598858ec4cf6a9f0d858def76726
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:05:04 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 49893f24150448558fbf951426237f39
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:05:15 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 1347c5c3b50e4fb3a0b4ad0f6c73b0f3
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:05:25 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 27b7761807f44237a22d05099bc70d1d
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:05:36 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 0b236ddcdb024dccbbccf4c5c5ca2a40
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:05:46 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 5e50e9684926415a97a7d2747b4785c3
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:05:56 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 7bf40c46e5364045937d6cb30c1060dd
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:06:07 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 3de312144e284a1da59c8218fd40789b
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:06:17 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: c135762403bb40d68b9db0d31713e2c0
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:06:28 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 7f2973f55f324c1cb8bf140644c9d992
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:06:38 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: cec6a3fe3d544389bc5c6ec4cc1c8c15
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:06:49 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 0a9343e828e0412fb9f82419604f4a0c
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:06:59 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 46c9ede64d634614961c4630513969cc
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:07:09 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: 6c0867704dcf4f158b8871351c3e9a30
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:07:20 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 26fa7777140b4e6c9981f5c1242e39c6
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:07:30 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 24c1047502654582ba3a59e5efa62654
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:07:41 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 46cbd5ff8e3241a2a3a3292e7fd387e2
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:07:51 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: e84873118cdf4129b60f44a325dc4038
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:08:02 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 8e9f7633ef634ac28b2b7a22317e3ace
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:08:12 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 4b509c909e4e45958ec2eb5a74740340
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:08:22 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 43b68833f1bd4edcaa8c982bbe5e40bc
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:08:33 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 8b85c9c0ae5c424796132cee0d46d734
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:08:43 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 0c165bbf631b4ab4b336e6d437e847c8
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:08:53 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 3a516b63ecf84fa596a8f61cf721783a
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:09:04 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: a47cea4c5c3642a198c62a03355d6f2f
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:09:14 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 145dbff7a2394d97b49c43ae0207aa59
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:09:25 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: True, time_key: N/A
+Run ID for current run: 62cfb89c373446e8a8256de86799cd3a
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:09:35 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: af4a5e9fcef346dca45150ec00e0437c
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:09:46 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 075631e5ba2745d2aded9caea488e68b
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:09:56 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: ad2924239cee41caa29b00489fa9f1a4
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:10:07 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: 44a345f60829487dab4843be38c5d1e0
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:10:17 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: ef86685ac35645f8bb43dfe686cddb32
+--- Command Successful ---
+
+Waiting for 10 seconds...
+--- Tue Sep 23 22:10:28 2025 ---
+Executing command: {"image_name": "image_name.jpg", "desired_transformations": ["flip"]}
+Sending to home region: False, time_key: N/A
+Run ID for current run: eef382619dfc45fd9b2ee137c8885fec
+--- Command Successful ---
+
+Waiting for 10 seconds...
+
+Time limit reached. Not starting another run.
+
+Script finished after 15 minutes and 90 iterations.
+
+Process finished with exit code 0
