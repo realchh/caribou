@@ -1,6 +1,8 @@
 import re
 from typing import Any, Optional, Sequence
 
+from caribou.common.provider import Provider
+from caribou.common.utils import generate_workflow_gcp_function_name
 from caribou.deployment.common.config.config import Config
 from caribou.deployment.common.deploy.models.deployment_package import DeploymentPackage
 from caribou.deployment.common.deploy.models.function import Function
@@ -237,7 +239,17 @@ class Workflow(Resource):
 
             provider_region = placement["provider_region"]
 
-            function_resource_name = function_name + "_" + provider_region["provider"] + "-" + provider_region["region"]
+            if provider_region["provider"] == Provider.GCP.value:
+                if self.version is None:
+                    raise RuntimeError("Workflow version is not set. This should be impossible")
+
+                function_resource_name = generate_workflow_gcp_function_name(
+                    self.name, self.version, function_name, provider_region
+                )
+            else:
+                function_resource_name = (
+                    function_name + "_" + provider_region["provider"] + "-" + provider_region["region"]
+                )
 
             function_instance_to_resource_name[instance_name] = function_resource_name
 
@@ -310,18 +322,31 @@ class Workflow(Resource):
             # (Isolate the actual function name from the full function name)
             # NOTE: This may need to be changed if there are major changes to the
             # naming convention of the function name in _get_function_name() method
-            # of wokflow_builder.py
-            pattern = r"^[^-]+-[^-]+-(.*)_[^-]+-"
+            # of workflow_builder.py
+            pattern_aws = r"^[^-]+-[^-]+-(.*)_[^-]+-"
+            pattern_gcp = r"^[^-]+-[^-]+-[\d]+-[\d]+-[\d]+-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+"
 
             # Search for the pattern in the input string
-            match = re.search(pattern, function_name)
-            if match:
-                function_name = match.group(1)
+            match_aws = re.search(pattern_aws, function_name)
+            match_gcp = re.search(pattern_gcp, function_name)
+            if match_aws:
+                function_name = match_aws.group(1)
+
+                if len(function_name) > 20 or len(function_name) == 0:
+                    raise RuntimeError("Function name must be greater than 0 and less than or equal to 20 characters")
+
+            elif match_gcp:
+                function_name = match_gcp.group(0)
+
             else:
                 raise RuntimeError("Unexpected Error in function name:", function_name)
 
-            if len(function_name) > 20 or len(function_name) == 0:
-                raise RuntimeError("Function name must be greater than 0 and less than or equal to 20 characters")
-
-            if not function_name.replace("_", "").isalnum():
+            if (
+                not function_name.replace(
+                    "-",
+                    "",
+                )
+                .replace("_", "")
+                .isalnum()
+            ):
                 raise RuntimeError("Function name must contain only letters, numbers, or underscores")

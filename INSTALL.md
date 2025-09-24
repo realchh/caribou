@@ -129,3 +129,141 @@ You can get one by following the instructions on the [Electricity Map](https://a
 ## Other dependencies
 
 Since the AWS lambda environment restricts us from using Docker, we have to migrate the workflows using [crane](https://github.com/google/go-containerregistry/tree/main/cmd/crane). If you plan on running the framework locally instead of deploying it to the cloud, please install the crane as described in the [crane documentation](https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md).
+
+# GCP Support
+## GCP Account Access
+To run the framework, you first need to setup a [GCP project](console.cloud.google.com).
+
+Then, install the [gcloud CLI](https://cloud.google.com/sdk/docs/install#linux) using these commands:
+- Download the linux archive files:
+```
+curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+```
+- Extract the contents of the file:
+```
+tar -xf google-cloud-cli-linux-x86_64.tar.gz
+```
+- Run the gcloud CLI installation script:
+```
+./google-cloud-sdk/install.sh
+```
+- Initialize the gcloud CLI:
+```
+gcloud init
+```
+
+## GCP APIs that needs to be enabled for the service
+
+- [Cloud Run](https://console.developers.google.com/apis/api/run.googleapis.com/)
+- [Firestore](https://console.developers.google.com/apis/api/firestore.googleapis.com/)
+- [IAM](https://console.developers.google.com/apis/api/iam.googleapis.com/)
+- [Cloud Resource Manager](https://console.developers.google.com/apis/api/cloudresourcemanager.googleapis.com/)
+- [Cloud Scheduler](https://console.developers.google.com/apis/api/cloudscheduler.googleapis.com/)
+- [Cloud Billing](https://console.developers.google.com/apis/api/cloudbilling.googleapis.com/)
+- [Cloud Monitoring](https://console.developers.google.com/apis/api/monitoring.googleapis.com/)
+- [Cloud Logging](https://console.developers.google.com/apis/api/logging.googleapis.com/)
+
+If gcloud CLI has been properly installed, you can run this command to enable all of the required APIs
+```
+gcloud services enable \
+  run.googleapis.com \
+  firestore.googleapis.com \
+  iam.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  cloudscheduler.googleapis.com \
+  cloudbilling.googleapis.com \
+  monitoring.googleapis.com \
+  logging.googleapis.com
+```
+
+## Gcloud authentication for the framework
+`gcloud init` only sets up the authentication for the command line. For the python scripts and framework, you need to
+use a different method to log in and generate a credential file required to run our framework.
+```
+# Create the service account
+gcloud iam service-accounts create caribou-framework-sa \
+    --description="Service account for Caribou framework operations" \
+    --display-name="Caribou Framework Service Account"
+
+# Grant all necessary roles
+ROLES=(
+    "roles/run.admin"
+    "roles/run.invoker"
+    "roles/artifactregistry.admin"
+    "roles/storage.admin"
+    "roles/datastore.owner"
+    "roles/firebase.admin"
+    "roles/pubsub.admin"
+    "roles/cloudscheduler.admin"
+    "roles/iam.serviceAccountAdmin"
+    "roles/resourcemanager.projectIamAdmin"
+    "roles/iam.serviceAccountTokenCreator"
+    "roles/logging.viewer"
+    "roles/monitoring.viewer"
+    "roles/browser"
+    "roles/cloudbuild.builds.builder"
+    "roles/iam.serviceAccountUser"
+)
+
+for role in "${ROLES[@]}"; do
+    gcloud projects add-iam-policy-binding YOUR-PROJECT-ID \
+        --member="serviceAccount:caribou-framework-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com" \
+        --role="$role"
+done
+```
+After the script has finished running, you can download the service account key to your machine to then be used for authenticating to google cloud services. Keep this key in a secure place, treat it like a password.
+```
+# Download the service account key
+gcloud iam service-accounts keys create ~/caribou-framework-sa-key.json \
+    --iam-account=caribou-framework-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com
+
+# Set environment variable
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/caribou-framework-sa-key.json"
+```
+
+## Default key-value store database
+For GCP, we are using firestore to store our key-value pairs. Please create a default firestore database.
+
+- Go to [firestore page](https://console.cloud.google.com/firestore/databases) in the Google Cloud Console.
+- Click on "CREATE A FIRESTORE DATABASE".
+- Select Native Mode.
+- Use the default database id "(default)". Using this id allows you to take advantage of firestore's [free quota](https://firebase.google.com/docs/firestore/quotas#free-quota).
+- Choose your default system region (e.g., us-east1) to be the database region.
+- Click on "CREATE DATABASE". Your firestore database will then be successfully created. This may take a while.
+
+To do this step, you could also use the following command. Change the region here to your preferred default system region. Here, we are using `us-east1` as our default system region.
+```
+gcloud firestore databases create --location=us-east1
+```
+
+## Configuring Caribou to use GCP
+Set the environment variable `CARIBOU_DEFAULT_PROVIDER` to GCP.
+```
+export CARIBOU_DEFAULT_PROVIDER=gcp
+```
+
+There is no need to run `caribou setup_tables`. Firestore automatically generates the table when a value is provided to the table.
+
+## Other dependencies
+
+We are using [gcrane](https://cloud.google.com/artifact-registry/docs/docker/copy-images#gcrane-local
+) to copy artifact images to another artifact registry region.
+
+For linux users:
+
+Download gcrane using the command: 
+```
+curl -L \
+https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
+-o go-containerregistry.tar.gz
+```
+And install it using:
+```
+tar -zxvf go-containerregistry.tar.gz
+chmod +x gcrane
+sudo mv gcrane /usr/local/bin/
+```
+To verify that gcrane is installed, you can try running:
+```
+gcrane version
+```

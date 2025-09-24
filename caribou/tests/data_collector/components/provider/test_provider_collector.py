@@ -7,46 +7,62 @@ from caribou.data_collector.components.provider.provider_collector import Provid
 
 class TestProviderCollector(unittest.TestCase):
     def setUp(self):
-        with patch("os.environ.get") as mock_os_environ_get, patch("boto3.client") as mock_boto3, patch(
-            "caribou.common.utils.str_to_bool"
-        ) as mock_str_to_bool:
-            mock_boto3.return_value = MagicMock()
-            mock_os_environ_get.return_value = "test_key"
-            mock_str_to_bool.return_value = False
+        # We patch ProviderRetriever where it's used inside the provider_collector module.
+        # This patch will replace the real ProviderRetriever with a mock.
+        self.retriever_patcher = patch(
+            "caribou.data_collector.components.provider.provider_collector.ProviderRetriever"
+        )
 
-            # Need to do the above as issue with Provider Retriever constructor
-            # Maybe a better way to do this is warrented
-            self.provider_collector = ProviderCollector()
+        # We also patch the Exporter, as the `run` method will try to create it.
+        self.exporter_patcher = patch("caribou.data_collector.components.provider.provider_collector.ProviderExporter")
 
-    @patch.object(ProviderRetriever, "retrieve_available_regions")
-    @patch.object(ProviderRetriever, "retrieve_provider_region_data")
-    @patch.object(ProviderExporter, "export_available_region_table")
-    @patch.object(ProviderExporter, "export_all_data")
-    @patch.object(ProviderExporter, "get_modified_regions")
-    @patch.object(ProviderExporter, "update_available_region_timestamp")
+        # Start the patchers and get the mock classes
+        self.mock_retriever_class = self.retriever_patcher.start()
+        self.mock_exporter_class = self.exporter_patcher.start()
+
+        # Ensure the patchers are stopped after each test
+        self.addCleanup(self.retriever_patcher.stop)
+        self.addCleanup(self.exporter_patcher.stop)
+
+        # Now it's safe to instantiate the ProviderCollector because its
+        # dependencies (ProviderRetriever and ProviderExporter) are mocked.
+        self.provider_collector = ProviderCollector()
+
     def test_run(
         self,
-        mock_update_available_region_timestamp,
-        mock_get_modified_regions,
-        mock_export_all_data,
-        mock_export_available_region_table,
-        mock_retrieve_provider_region_data,
-        mock_retrieve_available_regions,
     ):
-        mock_retrieve_available_regions.return_value = {"aws:region1": {"Region Specification Data": "Data"}}
-        mock_retrieve_provider_region_data.return_value = {"aws:region1": {"Provider Region Data": "Data"}}
-        mock_get_modified_regions.return_value = {"aws:region1"}
+        # --- Arrange ---
+        # The __init__ of ProviderCollector created mock instances of the retriever and exporter.
+        # We can now access them through the class attributes.
+        mock_retriever_instance = self.provider_collector._data_retriever
+        mock_exporter_instance = self.provider_collector._data_exporter
 
+        # Configure the return values for the methods that will be called
+        mock_retriever_instance.retrieve_available_regions.return_value = {
+            "aws:region1": {"Region Specification Data": "Data"}
+        }
+        mock_retriever_instance.retrieve_provider_region_data.return_value = {
+            "aws:region1": {"Provider Region Data": "Data"}
+        }
+        mock_exporter_instance.get_modified_regions.return_value = {"aws:region1"}
+
+        # --- Act ---
         self.provider_collector.run()
 
-        mock_retrieve_available_regions.assert_called_once()
-        mock_export_available_region_table.assert_called_once_with(
+        # --- Assert ---
+        # Verify that the methods on our mock instances were called as expected
+        mock_retriever_instance.retrieve_available_regions.assert_called_once()
+        mock_exporter_instance.export_available_region_table.assert_called_once_with(
             {"aws:region1": {"Region Specification Data": "Data"}}
         )
-        mock_retrieve_provider_region_data.assert_called_once()
-        mock_export_all_data.assert_called_once_with({"aws:region1": {"Provider Region Data": "Data"}}, {})
-        mock_get_modified_regions.assert_called_once()
-        mock_update_available_region_timestamp.assert_called_once_with("provider_collector", {"aws:region1"})
+        mock_retriever_instance.retrieve_provider_region_data.assert_called_once()
+        mock_exporter_instance.export_all_data.assert_called_once_with(
+            {"aws:region1": {"Provider Region Data": "Data"}}, {}
+        )
+        mock_exporter_instance.get_modified_regions.assert_called_once()
+        mock_exporter_instance.update_available_region_timestamp.assert_called_once_with(
+            "provider_collector", {"aws:region1"}
+        )
 
 
 if __name__ == "__main__":

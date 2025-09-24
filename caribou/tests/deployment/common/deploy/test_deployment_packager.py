@@ -13,8 +13,13 @@ import shutil
 
 
 class TestDeploymentPackager(unittest.TestCase):
+    def __init__(self, methodName: str = "runTest"):
+        super().__init__(methodName)
+
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
+        self.config = Config({"home_region": {"provider": "aws", "region": "us-east-1"}}, self.test_dir)
+        self.packager = DeploymentPackager(self.config)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -95,19 +100,19 @@ class TestDeploymentPackager(unittest.TestCase):
 
         config = MagicMock()
         packager = DeploymentPackager(config)
-        packager._add_application_files(mock_zipfile, "/app_dir")
+        packager._add_application_files(mock_zipfile, "/app_dir")  # 2 files + 1 generic handler
 
-        self.assertEqual(mock_zipfile.write.call_count, 2)
+        self.assertEqual(mock_zipfile.write.call_count, 3)
 
     @patch("zipfile.ZipFile")
-    def test__add_mutli_x_serverless_dependency(self, mock_zipfile):
+    def test__add_multi_x_serverless_dependency(self, mock_zipfile):
         mock_zipfile.return_value.__enter__.return_value = MagicMock()
 
         config = MagicMock()
         packager = DeploymentPackager(config)
         packager._add_caribou_dependency(mock_zipfile)
 
-        self.assertEqual(mock_zipfile.write.call_count, 22)
+        self.assertEqual(mock_zipfile.write.call_count, 23)
 
     @patch.object(DeploymentPackager, "_download_deployment_package", return_value="test.zip")
     def test_re_build(self, mock_download_deployment_package):
@@ -271,6 +276,143 @@ class TestDeploymentPackager(unittest.TestCase):
             call("/path/to/project/caribou-go/subdir/file.sum", "caribou-go/subdir/file.sum"),
         ]
         zip_file.write.assert_has_calls(expected_calls, any_order=True)
+
+    # --- NEW AND EXTENDED TESTS ---
+
+    def test_determine_home_provider(self):
+        """Tests that the home provider is correctly determined from various config formats."""
+        # Test with dictionary format (AWS)
+        config_aws_dict = Config({"home_region": {"provider": "aws", "region": "us-east-1"}}, self.test_dir)
+        packager_aws = DeploymentPackager(config_aws_dict)
+        self.assertEqual(packager_aws._determine_home_provider(), "aws")
+
+        # Test with dictionary format (GCP)
+        config_gcp_dict = Config({"home_region": {"provider": "gcp", "region": "us-central1"}}, self.test_dir)
+        packager_gcp = DeploymentPackager(config_gcp_dict)
+        self.assertEqual(packager_gcp._determine_home_provider(), "gcp")
+
+        # Test with string format (legacy or simple format)
+        config_aws_str = Config({"home_region": "aws:us-west-2"}, self.test_dir)
+        packager_aws_str = DeploymentPackager(config_aws_str)
+        self.assertEqual(packager_aws_str._determine_home_provider(), "aws")
+
+    @patch("boto3.__version__", "1.2.3")
+    def test_ensure_requirements_adds_boto3_for_aws(self):
+        """Tests that boto3 is added to requirements for an AWS provider."""
+        # Setup a config for AWS
+        config_aws = Config({"home_region": {"provider": "aws", "region": "us-east-1"}}, self.test_dir)
+        packager = DeploymentPackager(config_aws)
+
+        req_path = os.path.join(self.test_dir, "requirements.txt")
+
+        # Use mock_open to simulate reading and writing to the file
+        m = mock_open(read_data="some-package==1.0.0")
+        with patch("builtins.open", m):
+            packager._ensure_requirements_filename_complete(req_path)
+
+        # Check that the file was opened for reading, then for appending
+        m.assert_any_call(req_path, "r", encoding="utf-8")
+        m.assert_any_call(req_path, "a", encoding="utf-8")
+
+        # Check that boto3 with the correct version was written to the file
+        handle = m()
+        # Get all the arguments from all calls to write()
+        written_content = "".join(c.args[0] for c in handle.write.call_args_list)
+        self.assertIn("boto3==1.2.3", written_content)
+        # Also check for another common package to be sure
+        self.assertIn("pyyaml==6.0.2", written_content)
+
+    @patch("google.cloud.storage.__version__", "2.0.0")
+    @patch("zstandard.__version__", "0.20.0")
+    @patch.object(DeploymentPackager, "_pytz_version", "2024.1")
+    @patch.object(DeploymentPackager, "_get_opentelemetry_version", return_value="1.0.0")
+    def test_ensure_requirements_adds_gcp_packages(self, mock_otel):
+        """Tests that all necessary GCP packages are added for a GCP provider."""
+        config_gcp = Config({"home_region": {"provider": "gcp", "region": "us-central1"}}, self.test_dir)
+        packager = DeploymentPackager(config_gcp)
+
+        req_path = os.path.join(self.test_dir, "requirements.txt")
+
+        m = mock_open(read_data="")
+        with patch("builtins.open", m):
+            packager._ensure_requirements_filename_complete(req_path)
+
+        # Check that a few key GCP packages were written
+        handle = m()
+        written_content = "".join(c.args[0] for c in handle.write.call_args_list)
+        self.assertIn("google-cloud-storage", written_content)
+        self.assertIn("google-cloud-run", written_content)
+        self.assertIn("functions-framework==3.*", written_content)
+        self.assertIn("opentelemetry-api==1.0.0", written_content)
+
+    def test_ensure_requirements_does_not_add_existing(self):
+        """Tests that existing packages are not re-added to requirements.txt."""
+        config_aws = Config({"home_region": {"provider": "aws", "region": "us-east-1"}}, self.test_dir)
+        packager = DeploymentPackager(config_aws)
+
+        req_path = os.path.join(self.test_dir, "requirements.txt")
+
+        # Simulate a requirements file that already contains boto3
+        m = mock_open(
+            read_data="boto3==1.2.3\nsome-other-package==1.0\npyyaml==6.0.2\npytz==2024.1\nzstandard==0.23.0"
+            "\nnumpy==2.2.1"
+        )
+        with patch("builtins.open", m):
+            packager._ensure_requirements_filename_complete(req_path)
+
+        # Assert that the file was opened for reading, but NOT for appending
+        m.assert_any_call(req_path, "r", encoding="utf-8")
+        handle = m()
+        self.assertNotIn(call(req_path, "a", encoding="utf-8"), m.mock_calls)
+        handle.write.assert_not_called()
+
+    @patch("subprocess.check_output")
+    def test_pytz_version_caching(self, mock_subprocess):
+        """Tests that the _pytz_version property correctly caches its result."""
+        mock_subprocess.return_value = b"Version: 2024.1"
+
+        # Access the property for the first time
+        version1 = self.packager._pytz_version
+        self.assertEqual(version1, "2024.1")
+        # The subprocess should have been called
+        mock_subprocess.assert_called_once()
+
+        # Access the property for the second time
+        version2 = self.packager._pytz_version
+        self.assertEqual(version2, "2024.1")
+        # The subprocess should NOT have been called again; the result is cached
+        mock_subprocess.assert_called_once()  # Call count is still 1
+
+    def test_hash_project_dir_consistency(self):
+        """Tests that the project hash is consistent for the same content."""
+        # Create a dummy project structure
+        src_dir = os.path.join(self.test_dir, "src")
+        os.makedirs(src_dir)
+        with open(os.path.join(self.test_dir, "app.py"), "w") as f:
+            f.write("print('hello')")
+        with open(os.path.join(src_dir, "utils.py"), "w") as f:
+            f.write("def helper(): pass")
+
+        req_file = os.path.join(self.test_dir, "requirements.txt")
+        with open(req_file, "w") as f:
+            f.write("requests")
+
+        # Calculate hash the first time
+        hash1 = self.packager._hash_project_dir(req_file, self.test_dir)
+
+        # Calculate hash the second time with identical content
+        hash2 = self.packager._hash_project_dir(req_file, self.test_dir)
+
+        self.assertEqual(hash1, hash2)
+        self.assertIsInstance(hash1, str)
+        self.assertEqual(len(hash1), 64)  # sha256 hexdigest length
+
+        # Change a file and check that the hash changes
+        with open(os.path.join(src_dir, "utils.py"), "w") as f:
+            f.write("def helper_modified(): pass")
+
+        hash3 = self.packager._hash_project_dir(req_file, self.test_dir)
+        self.assertNotEqual(hash1, hash3)
 
 
 if __name__ == "__main__":
