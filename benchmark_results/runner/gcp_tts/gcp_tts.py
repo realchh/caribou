@@ -5,10 +5,10 @@ import sys
 import caribou.endpoint.client as client
 
 # --- Configuration ---
-WORKFLOW_ID = "image_processing-0.0.1"
-ARGUMENT_PAYLOAD = '{"image_name": "image_name.jpg", "desired_transformations": ["flip"]}'
-INTERVAL_SECONDS = 0.2
-RUN_DURATION_MINUTES = 5
+WORKFLOW_ID = "text_2_speech_censoring-0.0.1"
+ARGUMENT_PAYLOAD = '{"input_file": "medium_input.txt", "t2s_service": "gtts"}'
+INTERVAL_SECONDS = 10
+RUN_DURATION_MINUTES = 15
 # -------------------
 
 if __name__ == "__main__":
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     max_counter = RUN_DURATION_MINUTES * 60 / INTERVAL_SECONDS
     counter = 0
 
-    with open('gcp_image_processing_5_rps.txt', 'a') as f:
+    with open('gcp_tts_0_1_rps.txt', 'a') as f:
         while counter < max_counter:
             f.write(f"--- {time.ctime()} ---")
             f.write(f"Executing command: {ARGUMENT_PAYLOAD}")

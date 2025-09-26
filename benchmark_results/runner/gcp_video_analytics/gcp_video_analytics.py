@@ -5,8 +5,8 @@ import sys
 import caribou.endpoint.client as client
 
 # --- Configuration ---
-WORKFLOW_ID = "image_processing-0.0.1"
-ARGUMENT_PAYLOAD = '{"image_name": "image_name.jpg", "desired_transformations": ["flip"]}'
+WORKFLOW_ID = "video_analytics-0.0.1"
+ARGUMENT_PAYLOAD = '{"video_name": "INO_ParkingEvening_RGB.mp4", "fanout_num": 6}'
 INTERVAL_SECONDS = 0.2
 RUN_DURATION_MINUTES = 5
 # -------------------
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     max_counter = RUN_DURATION_MINUTES * 60 / INTERVAL_SECONDS
     counter = 0
 
-    with open('gcp_image_processing_5_rps.txt', 'a') as f:
+    with open('gcp_video_analytics_5_rps.txt', 'a') as f:
         while counter < max_counter:
             f.write(f"--- {time.ctime()} ---")
             f.write(f"Executing command: {ARGUMENT_PAYLOAD}")
