@@ -178,13 +178,13 @@ def analyze_scenarios():
         trace_to_request_start = {}
 
         for log in flat_logs:
-            if "run.googleapis.com/system" in log.get("logName", "") and "Starting new instance" in log.get(
+            if "rrun.googleapis.com%2Fvarlog%2Fsystem" in log.get("logName", "") and "Starting new instance" in log.get(
                     "textPayload", ""):
                 instance_id = log.get("labels", {}).get("instanceId")
                 if instance_id:
                     cold_start_instance_ids.add(instance_id)
 
-            if "run.googleapis.com/requests" in log.get("logName", ""):
+            if "run.googleapis.com%2Frequests" in log.get("logName", ""):
                 trace = log.get("trace")
                 payload = log.get("httpRequest") or log.get("protoPayload")
                 if trace and payload and "latency" in payload:
