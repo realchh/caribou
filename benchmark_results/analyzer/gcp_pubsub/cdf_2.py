@@ -14,35 +14,35 @@ import matplotlib.pyplot as plt
 GCP_PROJECT_ID = "caribou-460422"
 
 SERVICE_NAMES = {
-    "get_requests": "pubs-ting-0-0-1-get-ests-gcp-us-ea1-97b98094d0a0",
-    "destination": "pubs-ting-0-0-1-dest-tion-gcp-us-ea1-3c3c79569ac3",
+    "get_requests": "pubs-ting-0-0-3-get-ests-gcp-us-ea1-6f83f8992d06",
+    "destination": "pubs-ting-0-0-3-dest-tion-gcp-us-ea1-2895579b0724",
 }
 
 SCENARIOS = {
     "Large Message (0.1 rps)": {
-        "start_time": datetime(2025, 10, 8, 1, 18, 4, tzinfo=timezone.utc),
-        "end_time": datetime(2025, 10, 8, 2, 0, 18, tzinfo=timezone.utc),
+        "start_time": datetime(2025, 10, 9, 2, 9, 41, tzinfo=timezone.utc),
+        "end_time": datetime(2025, 10, 9, 2, 51, 58, tzinfo=timezone.utc),
     },
     "Large Message (5 rps)": {
-        "start_time": datetime(2025, 10, 8, 1, 14, 23, tzinfo=timezone.utc),
-        "end_time": datetime(2025, 10, 8, 1, 15, 51, tzinfo=timezone.utc),
+        "start_time": datetime(2025, 10, 9, 2, 59, 30, tzinfo=timezone.utc),
+        "end_time": datetime(2025, 10, 9, 3, 1, 7, tzinfo=timezone.utc),
     },
     "Small Message (0.1 rps)": {
-        "start_time": datetime(2025, 10, 8, 2, 3, 37, tzinfo=timezone.utc),
-        "end_time": datetime(2025, 10, 8, 2, 46, 0, tzinfo=timezone.utc),
+        "start_time": datetime(2025, 10, 8, 21, 42, 14, tzinfo=timezone.utc),
+        "end_time": datetime(2025, 10, 8, 22, 24, 31, tzinfo=timezone.utc),
     },
     "Small Message (5 rps)": {
-        "start_time": datetime(2025, 10, 8, 1, 11, 55, tzinfo=timezone.utc),
-        "end_time": datetime(2025, 10, 8, 1, 13, 25, tzinfo=timezone.utc),
+        "start_time": datetime(2025, 10, 9, 3, 6, 34, tzinfo=timezone.utc),
+        "end_time": datetime(2025, 10, 9, 3, 8, 9, tzinfo=timezone.utc),
     },
 }
 # -------------------
 
 # --- Regular Expressions for Parsing ---
 LOG_PATTERN = re.compile(r"TIME \((.*?)\) RUN_ID \((.*?)\) MESSAGE \((.*?)\) LOG_VERSION")
+DEBUG_LOG_PATTERN = re.compile(r"TIME (.*) RUN_ID (\S+) MESSAGE\((.*)\)")
 TAINT_PATTERN = re.compile(r"TAINT \((.*?)\)")
 INSTANCE_PATTERN = re.compile(r"INSTANCE \((.*?)\)")
-SUCCESSOR_PATTERN = re.compile(r"SUCCESSOR \((.*?)\)")
 
 
 # ---------------------------------------
@@ -58,12 +58,12 @@ def fetch_logs(client: logging_v2.Client, service_name: str, start_time: datetim
         f'resource.labels.service_name="{service_name}"',
         f'timestamp >= "{time_start_str}"',
         f'timestamp <= "{time_end_str}"',
-        '(logName=~ "run.googleapis.com%2Frequests" OR logName =~ "run.googleapis.com%2Fvarlog%2Fsystem" OR jsonPayload.severity = "CARIBOU")'
+        '(logName=~ "run.googleapis.com%2Frequests" OR logName =~ "run.googleapis.com%2Fvarlog%2Fsystem" OR jsonPayload.severity = "CARIBOU" OR logName =~ "run.googleapis.com%2Fstdout")'
     ]
     query = " AND ".join(filter_parts)
 
     print(f"Fetching logs for '{service_name}'...")
-
+    # ... (rest of function is unchanged) ...
     max_retries = 5
     initial_delay = 5
 
@@ -74,8 +74,7 @@ def fetch_logs(client: logging_v2.Client, service_name: str, start_time: datetim
         except google_api_exceptions.ResourceExhausted as e:
             if attempt < max_retries - 1:
                 delay = initial_delay * (2 ** attempt)
-                print(
-                    f"  [WARNING] Quota limit likely hit. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                print(f"  [WARNING] Quota limit likely hit. Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
                 print(f"  [ERROR] Failed to retrieve logs for {service_name} after {max_retries} attempts. Error: {e}")
@@ -86,30 +85,51 @@ def fetch_logs(client: logging_v2.Client, service_name: str, start_time: datetim
     return []
 
 
-def parse_caribou_log(log_entry: dict) -> Optional[Tuple[datetime, str, str]]:
-    """Parses a structured GCP log to extract the core Caribou log message."""
-    payload = log_entry.get("jsonPayload", {})
-    message = payload.get("message")
-    if not message: return None
+# MODIFIED: Rewritten parse_log to handle both textPayload and jsonPayload structures.
+def parse_log(log_entry: dict) -> Optional[Tuple[datetime, str, str]]:
+    """Parses a structured GCP log to extract the core log message, handling multiple formats."""
+    message = None
 
-    match = LOG_PATTERN.search(message)
-    if not match: return None
+    # Try to get the message from a structured JSON payload first.
+    if "jsonPayload" in log_entry and isinstance(log_entry["jsonPayload"], dict) and "message" in log_entry[
+        "jsonPayload"]:
+        message = log_entry["jsonPayload"]["message"]
+    # If that fails, try to get it from a simple text payload.
+    elif "textPayload" in log_entry:
+        message = log_entry["textPayload"]
 
-    timestamp_str, run_id, core_message = match.groups()
-    try:
-        if ',' in timestamp_str:
-            timestamp_str = timestamp_str.replace(',', '.', 1)
-        timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f%z")
-        return timestamp, run_id, core_message
-    except ValueError:
+    if not message:
         return None
+
+    # Now, attempt to match the message content against our known formats.
+    match = LOG_PATTERN.search(message)
+    if match:
+        timestamp_str, run_id, core_message = match.groups()
+        try:
+            if ',' in timestamp_str:
+                timestamp_str = timestamp_str.replace(',', '.', 1)
+            timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f%z")
+            return timestamp, run_id, core_message
+        except ValueError:
+            return None
+
+    match = DEBUG_LOG_PATTERN.search(message)
+    if match:
+        timestamp_str, run_id, core_message = match.groups()
+        try:
+            timestamp_str = timestamp_str.strip()
+            timestamp = datetime.fromisoformat(timestamp_str)
+            return timestamp, run_id, core_message
+        except ValueError:
+            return None
+
+    return None
 
 
 def plot_results(all_metrics: Dict[str, Dict[str, list]]):
-    """Generates a 2x2 grid of CDFs for Pub/Sub latency across all scenarios."""
-
+    """Generates a 2x2 grid of CDFs for the TOTAL Pub/Sub latency across all scenarios."""
     fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
-    fig.suptitle('Pub/Sub Latency Distribution (Warm Starts Only)', fontsize=16)
+    fig.suptitle('Total End-to-End Pub/Sub Latency Distribution (Warm Starts Only)', fontsize=16)
 
     scenario_map = {
         "Small Message (0.1 rps)": axes[0, 0],
@@ -117,14 +137,14 @@ def plot_results(all_metrics: Dict[str, Dict[str, list]]):
         "Large Message (0.1 rps)": axes[1, 0],
         "Large Message (5 rps)": axes[1, 1],
     }
-
+    # ... (rest of function is unchanged) ...
     for name, ax in scenario_map.items():
         metrics = all_metrics.get(name)
-        if not metrics or 'delay_get_requests_to_destination' not in metrics:
+        if not metrics or 'total_e2e_latency' not in metrics:
             ax.text(0.5, 0.5, 'No data', ha='center', va='center')
             continue
 
-        latencies_sec = metrics['delay_get_requests_to_destination']
+        latencies_sec = metrics['total_e2e_latency']
         latencies_ms = np.array(latencies_sec) * 1000.0
 
         sorted_latencies = np.sort(latencies_ms)
@@ -140,14 +160,12 @@ def plot_results(all_metrics: Dict[str, Dict[str, list]]):
     fig.text(0.5, 0.04, 'Latency (milliseconds)', ha='center', va='center', fontsize=14)
     fig.text(0.06, 0.5, 'CDF', ha='center', va='center', rotation='vertical', fontsize=14)
 
-    # MODIFIED: Set the left x-axis limit to 10ms for better readability
     plt.xlim(left=10)
-
     plt.tight_layout(rect=[0.08, 0.05, 1, 0.95])
 
-    filename = "2_pubsub_latency_cdf.png"
+    filename = "2_pubsub_total_latency_cdf.png"
     plt.savefig(filename)
-    print(f"\nCDF plot of Pub/Sub latencies saved to {filename}")
+    print(f"\nCDF plot of total Pub/Sub latencies saved to {filename}")
 
 
 def analyze_scenarios():
@@ -156,43 +174,35 @@ def analyze_scenarios():
         logging_client = logging_v2.Client()
     except Exception:
         print("[ERROR] Could not authenticate with Google Cloud.")
-        print("Please run 'gcloud auth application-default login' and try again.")
         sys.exit(1)
 
     all_scenario_metrics = {}
-
+    # ... (rest of function is unchanged) ...
     for name, window in SCENARIOS.items():
         print(f"\n--- Analyzing Scenario: {name} ---")
 
         all_logs = {key: fetch_logs(logging_client, s_name, window['start_time'], window['end_time']) for key, s_name in
                     SERVICE_NAMES.items()}
-
         flat_logs = [log for logs in all_logs.values() for log in logs]
         if not flat_logs:
             print(f"  - [WARNING] No logs found for scenario '{name}'. Skipping.")
             continue
 
-        cold_start_instance_ids = set()
-        instance_to_run_id = {}
-        trace_to_request_start = {}
-
+        cold_start_instance_ids, instance_to_run_id, trace_to_request_start = set(), {}, {}
         for log in flat_logs:
             if "run.googleapis.com%2Fvarlog%2Fsystem" in log.get("logName", "") and "Starting new instance" in log.get(
                     "textPayload", ""):
                 instance_id = log.get("labels", {}).get("instanceId")
-                if instance_id:
-                    cold_start_instance_ids.add(instance_id)
-
+                if instance_id: cold_start_instance_ids.add(instance_id)
             if "run.googleapis.com%2Frequests" in log.get("logName", ""):
                 trace = log.get("trace")
                 payload = log.get("protoPayload") or log.get("httpRequest")
                 if trace and payload and "latency" in payload:
-                    trace_id = trace.split("/")[-1]
-                    end_time = datetime.fromisoformat(log["timestamp"].replace("Z", "+00:00"))
+                    trace_id, end_time = trace.split("/")[-1], datetime.fromisoformat(
+                        log["timestamp"].replace("Z", "+00:00"))
                     latency_s = float(payload["latency"].rstrip("s"))
                     trace_to_request_start[trace_id] = end_time - timedelta(seconds=latency_s)
-
-            parsed = parse_caribou_log(log)
+            parsed = parse_log(log)
             instance_id = log.get("labels", {}).get("instanceId")
             if parsed and instance_id:
                 _, run_id, _ = parsed
@@ -200,102 +210,67 @@ def analyze_scenarios():
 
         cold_start_run_ids = {instance_to_run_id[inst_id] for inst_id in cold_start_instance_ids if
                               inst_id in instance_to_run_id}
-        print(f"  - Found {len(cold_start_run_ids)} runs that included a cold start. Excluding from analysis.")
+        print(f"  - Found {len(cold_start_run_ids)} runs that included a cold start. Excluding.")
 
         run_events = defaultdict(list)
-        for service_key, logs in all_logs.items():
+        for logs in all_logs.values():
             for log in logs:
-                parsed = parse_caribou_log(log)
-                if not parsed: continue
-                timestamp, run_id, message = parsed
-                if run_id in cold_start_run_ids: continue
-
-                trace_id = log.get("trace", "").split("/")[-1] if log.get("trace") else None
-                run_events[run_id].append({'timestamp': timestamp, 'message': message, 'trace_id': trace_id})
+                parsed = parse_log(log)
+                if parsed and parsed[1] not in cold_start_run_ids:
+                    trace_id = log.get("trace", "").split("/")[-1] if log.get("trace") else None
+                    run_events[parsed[1]].append({'timestamp': parsed[0], 'message': parsed[2], 'trace_id': trace_id})
 
         metrics = defaultdict(list)
         for run_id, events in run_events.items():
             events.sort(key=lambda x: x['timestamp'])
 
-            run_timeline = {}
-            invocations = {}
+            invocations = defaultdict(dict)
 
             for event in events:
                 timestamp, message, trace_id = event['timestamp'], event['message'], event['trace_id']
+                taint_match = TAINT_PATTERN.search(message)
+                if not taint_match: continue
+                taint = taint_match.group(1)
 
-                instance_match = INSTANCE_PATTERN.search(message)
-                if not instance_match: continue
-                instance_name = instance_match.group(1).split(':')[0]
-
-                if message.startswith("INVOKED"):
-                    run_timeline.setdefault(instance_name, {})['start_time'] = timestamp
-                    if trace_id:
-                        run_timeline[instance_name]['trace_id'] = trace_id
-                elif message.startswith("EXECUTED"):
-                    run_timeline.setdefault(instance_name, {})['end_time'] = timestamp
+                if message.startswith("DEBUG_PUBLISHING_TO_MESSAGING_SERVICE"):
+                    invocations[taint]['publish_start_time'] = timestamp
                 elif message.startswith("INVOKING_SUCCESSOR"):
-                    taint_match = TAINT_PATTERN.search(message)
-                    successor_match = SUCCESSOR_PATTERN.search(message)
-                    if taint_match and successor_match:
-                        taint, successor = taint_match.group(1), successor_match.group(1).split(':')[0]
-                        invocations[taint] = {'start_time': timestamp, 'from': instance_name, 'to': successor}
+                    invocations[taint]['publish_acked_time'] = timestamp
+                elif message.startswith("INVOKED"):
+                    instance_match = INSTANCE_PATTERN.search(message)
+                    if instance_match and instance_match.group(1).startswith('destination'):
+                        invocations[taint]['subscriber_invoked_time'] = timestamp
+                        if trace_id:
+                            invocations[taint]['subscriber_trace_id'] = trace_id
 
             for taint, data in invocations.items():
-                from_instance = data['from']
-                to_instance = data['to']
+                if all(k in data for k in ['publish_start_time', 'publish_acked_time', 'subscriber_invoked_time']):
+                    subscriber_start_time = None
+                    if 'subscriber_trace_id' in data and data['subscriber_trace_id'] in trace_to_request_start:
+                        subscriber_start_time = trace_to_request_start[data['subscriber_trace_id']]
+                    else:
+                        subscriber_start_time = data['subscriber_invoked_time']
 
-                if to_instance in run_timeline and 'start_time' in run_timeline[to_instance]:
-                    successor_invoked_time = run_timeline[to_instance]['start_time']
-                    invocation_start_time = data['start_time']
+                    total_latency = (subscriber_start_time - data['publish_start_time']).total_seconds()
+                    publish_latency = (data['publish_acked_time'] - data['publish_start_time']).total_seconds()
+                    transport_latency = (subscriber_start_time - data['publish_acked_time']).total_seconds()
 
-                    precise_delay_calculated = False
-                    if 'trace_id' in run_timeline[to_instance]:
-                        successor_trace_id = run_timeline[to_instance]['trace_id']
-                        if successor_trace_id in trace_to_request_start:
-                            request_start_time = trace_to_request_start[successor_trace_id]
-                            delay = (request_start_time - invocation_start_time).total_seconds()
-                            if delay >= 0:
-                                metrics[f'delay_{from_instance}_to_{to_instance}'].append(delay)
-                                precise_delay_calculated = True
-                                platform_overhead = (successor_invoked_time - request_start_time).total_seconds()
-                                metrics[f'platform_overhead_{to_instance}'].append(platform_overhead)
+                    if total_latency > 0:
+                        metrics['total_e2e_latency'].append(total_latency)
+                        metrics['publish_latency'].append(publish_latency)
+                        metrics['transport_latency'].append(transport_latency)
 
-                    if not precise_delay_calculated:
-                        delay = (successor_invoked_time - invocation_start_time).total_seconds()
-                        if delay >= 0:
-                            metrics[f'delay_{from_instance}_to_{to_instance}'].append(delay)
-                            metrics['imprecise_delays_counted'].append(1)
-
-            critical_path = ['get_requests', 'destination']
-            if all(k in run_timeline and 'start_time' in run_timeline[k] and 'end_time' in run_timeline[k] for k in
-                   critical_path):
-                e2e_time = (run_timeline['destination']['end_time'] - run_timeline['get_requests'][
-                    'start_time']).total_seconds()
-                metrics['e2e_time'].append(e2e_time)
-
-                for inst in critical_path:
-                    metrics[f'{inst}_exec_time'].append(
-                        (run_timeline[inst]['end_time'] - run_timeline[inst]['start_time']).total_seconds())
-
-        if not metrics['e2e_time']:
-            print("  - [ERROR] Found no complete, correlated warm workflow runs in this scenario.")
+        if not metrics['total_e2e_latency']:
+            print("  - [ERROR] Found no complete, correlated warm workflow runs.")
             continue
 
         median_results = {f'median_{key}': np.median(val) for key, val in metrics.items() if val}
-
         print(f"Results for '{name}':")
-        print(f"  - Found {len(metrics['e2e_time'])} complete warm runs.")
-        if 'imprecise_delays_counted' in metrics:
-            print(
-                f"  - Note: {len(metrics['imprecise_delays_counted'])} Pub/Sub delays were calculated using the less precise fallback method.")
-        print(f"  - Median End-to-End Time: {median_results.get('median_e2e_time', 0):.4f}s")
+        print(f"  - Found {len(metrics['total_e2e_latency'])} complete warm runs.")
+        print(f"  - Median Total E2E Latency: {median_results.get('median_total_e2e_latency', 0):.4f}s")
         print("  --- Breakdown ---")
-        print(f"    - Median 'get_requests' execution: {median_results.get('median_get_requests_exec_time', 0):.4f}s")
-        print(
-            f"    - Median Pub/Sub Latency:          {median_results.get('median_delay_get_requests_to_destination', 0):.4f}s")
-        print(f"    - Median 'destination' execution:  {median_results.get('median_destination_exec_time', 0):.4f}s")
-        print(
-            f"    - Median Platform Overhead at 'destination': {median_results.get('median_platform_overhead_destination', 0):.4f}s")
+        print(f"    - Median Publish Latency:   {median_results.get('median_publish_latency', 0):.4f}s")
+        print(f"    - Median Transport Latency: {median_results.get('median_transport_latency', 0):.4f}s")
 
         all_scenario_metrics[name] = metrics
 
