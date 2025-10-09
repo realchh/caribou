@@ -11,7 +11,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Change the following bucket name and region to match your setup
-workflow = CaribouWorkflow(name="pubsub_testing", version="0.0.1")
+workflow = CaribouWorkflow(name="pubsub_testing", version="0.0.3")
 
 @workflow.serverless_function(
     name="get_requests",
@@ -59,6 +59,6 @@ def destination(event: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError("No message provided")
 
-    print(f"  [INFO] event: {event}")
+    print(f"  [INFO] message size: {message_size}")
 
     return {"status": 200}
