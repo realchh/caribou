@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Optional
 
+from caribou.common.constants import GLOBAL_TIME_ZONE, LOG_VERSION
 from caribou.deployment.common.deploy.models.resource import Resource
 
 
@@ -113,6 +114,22 @@ class RemoteClient(ABC):  # pylint: disable=too-many-public-methods
             if sync and alternative_message is not None:
                 message = alternative_message
 
+            message_dictionary = json.loads(message)
+            if "payload" not in message_dictionary:
+                payload = ""
+            payload = message_dictionary["payload"]
+
+            taint = message_dictionary.get("transmission_taint")
+
+            log_message = (
+                f"TIME {datetime.now(GLOBAL_TIME_ZONE)} RUN_ID {workflow_instance_id} MESSAGE("
+                f"DEBUG_PUBLISHING_TO_MESSAGING_SERVICE: INSTANCE ({current_instance_name}) potentially calling "
+                f"SUCCESSOR ({function_name}) with PAYLOAD_SIZE "
+                f"({len(message.encode('utf-8')) / (1024**3)}) GB and TAINT ({taint}))"
+                f" LOG_VERSION ({LOG_VERSION})"
+            )
+
+            print(log_message)
             self.send_message_to_messaging_service(identifier, message)
         except Exception as e:
             raise RuntimeError(f"Could not invoke function through SNS: {str(e)}") from e

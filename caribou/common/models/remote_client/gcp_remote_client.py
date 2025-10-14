@@ -4,12 +4,15 @@ import os
 import random
 import subprocess
 import tempfile
+import threading
 import time
 import zipfile
 from datetime import UTC, datetime, timedelta
 from time import sleep
 from typing import Any, Optional
 
+import requests
+import google.auth.transport.requests
 from google.api_core import exceptions as google_api_exceptions
 from google.api_core.client_options import ClientOptions
 from google.auth import default as google_auth_default
@@ -35,6 +38,7 @@ from google.pubsub_v1 import DeadLetterPolicy, PushConfig, RetryPolicy
 
 from caribou.common.constants import (
     BUFFER_GCP_METRICS_GRACE_PERIOD,
+    CARIBOU_FUNCTION_ENDPOINTS_TABLE,
     CARIBOU_WORKFLOW_IMAGES_TABLE,
     DEPLOYMENT_RESOURCES_BUCKET,
     FIRESTORE_TTL_FIELD_NAME,
@@ -83,12 +87,15 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             raise ValueError("GCP region must be provided.")
 
         self._workflow_image_cache: dict[str, dict[str, str]] = {}
+        self._function_endpoint_cache: dict[str, str] = {}
         self._deployment_resource_bucket: str = os.environ.get(
             "CARIBOU_OVERRIDE_DEPLOYMENT_RESOURCES_BUCKET", DEPLOYMENT_RESOURCES_BUCKET
         )
 
         self._client_cache: dict[str, Any] = {}
         self._last_request_time = 0.0
+        self._project_number: str | None = None  # Cache for project number
+        self._id_token_cache: dict[str, tuple[str, float]] = {}  # Cache for ID tokens: {audience: (token, expiry_time)}
 
     # pylint: disable=too-many-branches
     def _client(self, service_name: str) -> Any:
@@ -194,6 +201,75 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
     @property
     def _scheduling_client(self) -> scheduler_v1.CloudSchedulerClient:
         return self._client("scheduling")
+
+    def _get_project_number(self) -> str:
+        """Get the numeric project number (cached)."""
+        if self._project_number is None:
+            project = self._resource_manager_client.get_project(name=f"projects/{self._project_id}")
+            self._project_number = project.name.split("/")[1]
+        return self._project_number
+
+    def _get_id_token(self, target_audience: str) -> str:
+        """
+        Get an ID token for the target audience (e.g., Cloud Run service URL).
+        Tokens are cached and reused until they expire (typically 1 hour).
+        
+        Args:
+            target_audience: The audience for the ID token (usually the service URL)
+            
+        Returns:
+            A valid ID token
+        """
+        current_time = time.time()
+        
+        # Check if we have a cached token that's still valid (with 5 minute buffer)
+        if target_audience in self._id_token_cache:
+            cached_token, expiry_time = self._id_token_cache[target_audience]
+            if current_time < expiry_time - 300:  # 5 minute buffer before expiry
+                logger.debug("Using cached ID token for %s", target_audience)
+                return cached_token
+        
+        # Need to fetch a new token
+        logger.debug("Fetching new ID token for %s", target_audience)
+        auth_req = google.auth.transport.requests.Request()
+        
+        try:
+            # Method 1: Service account credentials
+            if hasattr(self._credentials, 'signer') and hasattr(self._credentials, 'service_account_email'):
+                id_token_credentials = service_account.IDTokenCredentials(
+                    signer=self._credentials.signer,
+                    service_account_email=self._credentials.service_account_email,
+                    token_uri=self._credentials._token_uri,
+                    target_audience=target_audience
+                )
+                id_token_credentials.refresh(auth_req)
+                token_value = id_token_credentials.token
+                # ID tokens are typically valid for 1 hour
+                expiry_time = current_time + 3600
+            # Method 2: Credentials with id_token attribute (user credentials)
+            elif hasattr(self._credentials, 'id_token'):
+                self._credentials.refresh(auth_req)
+                token_value = self._credentials.id_token
+                # Use expiry from credentials if available
+                if hasattr(self._credentials, 'expiry') and self._credentials.expiry:
+                    expiry_time = self._credentials.expiry.timestamp()
+                else:
+                    expiry_time = current_time + 3600
+            # Method 3: fetch_id_token for default credentials
+            else:
+                token_value = id_token.fetch_id_token(auth_req, target_audience)
+                expiry_time = current_time + 3600
+            
+            # Cache the token
+            self._id_token_cache[target_audience] = (token_value, expiry_time)
+            logger.debug("Cached new ID token for %s (expires in %.0f seconds)", 
+                        target_audience, expiry_time - current_time)
+            
+            return token_value
+            
+        except Exception as e:
+            logger.error("Failed to get ID token for %s: %s", target_audience, e)
+            raise RuntimeError(f"Failed to get ID token: {e}") from e
 
     def get_current_provider_region(self) -> str:
         return f"gcp_{self._region}"
@@ -580,6 +656,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             max_concurrency=concurrency,
         )
 
+        # Store the HTTP endpoint for future invocations
+        self._store_function_endpoint(function_name, service_url)
+
         return service_url
 
     def _create_cloud_run_service(
@@ -737,6 +816,118 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
 
         return image_uri
 
+    def _store_function_endpoint(self, function_name: str, endpoint_url: str) -> None:
+        """Store the HTTP endpoint URL for a function in Firestore and local cache."""
+        # Store in local cache
+        self._function_endpoint_cache[function_name] = endpoint_url
+
+        # Store in Firestore for persistence
+        client = self._firestore_client
+        document = client.collection(CARIBOU_FUNCTION_ENDPOINTS_TABLE).document(function_name)
+        document.set({"endpoint": endpoint_url}, merge=True)
+        logger.info("Stored endpoint for function %s: %s", function_name, endpoint_url)
+
+    def _get_function_endpoint(self, function_name: str) -> str:
+        """
+        Retrieve the HTTP endpoint URL for a function.
+        First checks local cache, then Firestore, then queries Cloud Run service.
+        """
+        # Check local cache first
+        if function_name in self._function_endpoint_cache:
+            return self._function_endpoint_cache[function_name]
+
+        # Check Firestore
+        client = self._firestore_client
+        snap = client.collection(CARIBOU_FUNCTION_ENDPOINTS_TABLE).document(function_name).get()
+
+        if snap.exists:
+            document_dict = snap.to_dict() or {}
+            endpoint_url = document_dict.get("endpoint", "")
+            if endpoint_url:
+                # Cache it locally
+                self._function_endpoint_cache[function_name] = endpoint_url
+                return endpoint_url
+
+        # If not in cache or Firestore, query Cloud Run service
+        try:
+            run_client = self._run_client
+            full_name = run_client.service_path(self._project_id, self._region, function_name)
+            service = run_client.get_service(name=full_name)
+            endpoint_url = service.uri
+            
+            # Store it for future use
+            self._store_function_endpoint(function_name, endpoint_url)
+            return endpoint_url
+        except google_api_exceptions.NotFound as e:
+            raise RuntimeError(f"Cloud Run service {function_name} not found") from e
+
+    def _get_function_endpoint_from_topic_identifier(self, topic_identifier: str) -> str:
+        """
+        Extract function name from topic identifier and construct its HTTP endpoint URL.
+        
+        Args:
+            topic_identifier: Topic path like 'projects/test-project/topics/function-name_messaging_topic'
+            
+        Returns:
+            HTTP endpoint URL for the function
+            
+        The URL format is: https://{function-name}-{project-id}.{region}.run.app
+        Example: https://pubs-ting-0-0-4-get-ests-gcp-us-ea1-93de73e8a025-809845967121.us-east1.run.app
+        """
+        # Extract function name from topic identifier
+        # Format: projects/{project}/topics/{function-name}_messaging_topic
+        topic_name = topic_identifier.split("/")[-1]
+        if topic_name.endswith("_messaging_topic"):
+            function_name = topic_name[:-16]  # Remove "_messaging_topic" suffix (16 chars)
+        elif topic_name.endswith("-topic"):
+            function_name = topic_name[:-6]  # Remove "-topic" suffix (legacy format)
+        else:
+            function_name = topic_name
+        
+        # Extract region from function name
+        # Function name format: {prefix}-gcp-{country}-{region_abbrev}-{hash}
+        # Example: pubs-ting-0-0-4-get-ests-gcp-us-ea1-93de73e8a025
+        parts = function_name.split("-")
+        
+        # Find the "gcp" marker and extract country and region
+        try:
+            gcp_index = parts.index("gcp")
+            if gcp_index + 2 < len(parts):
+                country = parts[gcp_index + 1]  # e.g., "us"
+                region_abbrev = parts[gcp_index + 2]  # e.g., "ea1"
+                
+                # Expand region abbreviation back to full name
+                # ea -> east, we -> west, ce -> central, ne -> northeast, etc.
+                region_prefix = region_abbrev[:2]
+                region_number = region_abbrev[2:] if len(region_abbrev) > 2 else ""
+                
+                region_map = {
+                    "ea": "east",
+                    "we": "west",
+                    "ce": "central",
+                    "ne": "northeast",
+                    "se": "southeast",
+                    "sw": "southwest",
+                    "nw": "northwest",
+                    "no": "north",
+                    "so": "south",
+                }
+                
+                region_full = region_map.get(region_prefix, region_prefix)
+                full_region = f"{country}-{region_full}{region_number}"
+                
+                # Construct Cloud Run URL
+                # Format: https://{function-name}-{project-number}.{region}.run.app
+                # Note: Cloud Run URLs use the numeric project number, not the project ID
+                project_number = self._get_project_number()
+                url = f"https://{function_name}-{project_number}.{full_region}.run.app"
+                return url
+        except (ValueError, IndexError) as e:
+            logger.error("Failed to extract region from function name %s: %s", function_name, e)
+        
+        # Fallback to the original method if parsing fails
+        return self._get_function_endpoint(function_name)
+
     def _generate_dockerfile(self, additional_docker_commands: Optional[list[str]]) -> str:
         run_command = ""
         if additional_docker_commands and len(additional_docker_commands) > 0:
@@ -745,7 +936,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             run_command = f"RUN {run_command}"
 
         source_file = "generic_handler.py"
-        target_function = "lambda_handler"
+        target_function = "http_handler"  # Use HTTP handler for HTTP invocations
 
         return f"""
         FROM {self._region}-docker.pkg.dev/serverless-runtimes/google-22/runtimes/python312
@@ -767,7 +958,7 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         CMD ["functions-framework", \
         "--source", "{source_file}", \
         "--target", "{target_function}", \
-        "--signature-type", "event"]
+        "--signature-type", "http"]
         """
 
     def _build_docker_image(self, context_path: str, image_name: str) -> None:
@@ -884,6 +1075,9 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             service_account_email=role_identifier,
             max_concurrency=concurrency,
         )
+
+        # Store the HTTP endpoint for future invocations
+        self._store_function_endpoint(function_name, service_url)
 
         return service_url
 
@@ -1127,13 +1321,85 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         client.set_iam_policy(request={"resource": full_name, "policy": policy})
 
     def send_message_to_messaging_service(self, identifier: str, message: str) -> None:
-        client = self._pubsub_publisher_client
-        print("publishing")
-        # compressed json (also change caribou/deployment/client/caribou_workflow.py:1270 to toggle compression)
-        # response = client.publish(topic=identifier, data=compress_json_str(message))
-        response = client.publish(topic=identifier, data=message.encode("utf-8"))
-        # for some reason it needs this line so the message gets sent to pub/sub
-        print(response.result())
+        """
+        Invokes a workflow function via HTTP request or Pub/Sub.
+        
+        Args:
+            identifier: Topic path (e.g., 'projects/test-project/topics/function-name-topic')
+            message: JSON message to send
+            
+        To use Pub/Sub instead of HTTP, uncomment the Pub/Sub section and comment out the HTTP section.
+        
+        Note: HTTP invocation is non-blocking (fire-and-forget) to avoid blocking the caller
+        while the callee processes the request.
+        """
+        # ============================================================================
+        # HTTP-BASED INVOCATION (ACTIVE) - NON-BLOCKING
+        # ============================================================================
+        def _make_http_request():
+            """Internal function to make HTTP request in a separate thread."""
+            try:
+                # Get the Cloud Run service URL from cache/Firestore/Cloud Run
+                service_url = self._get_function_endpoint_from_topic_identifier(identifier)
+                
+                # Get cached or fresh ID token
+                id_token_value = self._get_id_token(service_url)
+                
+                # Prepare headers with authentication
+                headers = {
+                    "Authorization": f"Bearer {id_token_value}",
+                    "Content-Type": "application/json",
+                }
+                
+                # Parse message as JSON if it's a string
+                if isinstance(message, str):
+                    payload = json.loads(message)
+                else:
+                    payload = message
+                
+                # Debug: log the payload being sent
+                logger.info("Sending HTTP request to %s with payload keys: %s", service_url, 
+                           list(payload.keys()) if isinstance(payload, dict) else "NOT_A_DICT")
+                
+                # Make HTTP POST request (non-blocking from caller's perspective)
+                # Send as JSON string in the body (not as json parameter)
+                # This ensures the Cloud Function receives it correctly
+                response = requests.post(
+                    service_url,
+                    headers=headers,
+                    data=json.dumps(payload),  # Send as string, not json parameter
+                    timeout=300  # 5 minute timeout
+                )
+                
+                # Check response
+                response.raise_for_status()
+                logger.info("Successfully invoked function via HTTP. Status: %s, URL: %s", 
+                           response.status_code, service_url)
+                
+            except requests.exceptions.RequestException as e:
+                logger.error("HTTP invocation failed for %s: %s", identifier, e)
+                # Don't raise in thread - just log the error
+            except Exception as e:
+                logger.error("Failed to get service URL or auth token for %s: %s", identifier, e)
+                # Don't raise in thread - just log the error
+        
+        # Start the HTTP request in a daemon thread for fire-and-forget behavior
+        thread = threading.Thread(target=_make_http_request, daemon=True)
+        thread.start()
+        # Wait briefly to allow the thread to initiate the HTTP request
+        # This prevents the program from exiting before the request starts
+        thread.join(timeout=0.7)  # 700ms maximum wait
+
+        # ============================================================================
+        # PUB/SUB-BASED INVOCATION (COMMENTED OUT)
+        # ============================================================================
+        # client = self._pubsub_publisher_client
+        # print("publishing")
+        # # compressed json (also change caribou/deployment/client/caribou_workflow.py:1270 to toggle compression)
+        # # response = client.publish(topic=identifier, data=compress_json_str(message))
+        # response = client.publish(topic=identifier, data=message.encode("utf-8"))
+        # # for some reason it needs this line so the message gets sent to pub/sub
+        # print(response.result())
 
     def set_value_in_table(self, table_name: str, key: str, value: str, convert_to_bytes: bool = False) -> None:
         client = self._firestore_client
@@ -1686,11 +1952,20 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
             max_concurrency=80,
         )
 
-        topic_path = self.create_pubsub_topic(f"{function_name}-topic")
-        subscription_name = f"{function_name}-subscription"
-        self.create_pubsub_subscription(topic_path, subscription_name, url, service_account_email, timeout)
+        # Store the HTTP endpoint for future invocations
+        self._store_function_endpoint(function_name, url)
 
-        self.add_pubsub_permission_for_cloud_run(function_name, service_account_email)
+        # ============================================================================
+        # PUB/SUB SETUP (COMMENTED OUT - Not needed for HTTP-based invocation)
+        # ============================================================================
+        # When using HTTP invocation, Pub/Sub topics and subscriptions are not needed.
+        # Uncomment this section if you want to use Pub/Sub-based invocation.
+        #
+        # topic_path = self.create_pubsub_topic(f"{function_name}-topic")
+        # subscription_name = f"{function_name}-subscription"
+        # self.create_pubsub_subscription(topic_path, subscription_name, url, service_account_email, timeout)
+        #
+        # self.add_pubsub_permission_for_cloud_run(function_name, service_account_email)
 
         print(f"Caribou Lambda Framework remote cli function {function_name}" f" created successfully, with url: {url}")
         return url
@@ -1752,6 +2027,17 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         except google_api_exceptions.GoogleAPICallError as e:
             raise RuntimeError(f"Error creating timer rule {rule_name}: {e}") from e
 
+    def get_remote_cli_http_endpoint(self) -> str:
+        """Get the HTTP endpoint URL for remote CLI commands"""
+        remote_cli_name = REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME
+        client = self._run_client
+        full_name = client.service_path(self._project_id, self._region, remote_cli_name)
+        try:
+            service = client.get_service(name=full_name)
+            return service.uri
+        except google_api_exceptions.NotFound as e:
+            raise RuntimeError(f"Cloud Run service {remote_cli_name} not found") from e
+
     def get_remote_cli_topic_name(self) -> str:
         """Get the topic name for remote CLI commands"""
         remote_cli_name = REMOTE_CARIBOU_CLI_GCP_FUNCTION_NAME
@@ -1770,25 +2056,64 @@ class GCPRemoteClient(RemoteClient):  # pylint: disable=too-many-public-methods
         self, payload: dict[str, Any], invocation_type: str = "RequestResponse"
     ) -> None:
         """
-        Invokes the remote framework CLI (a Cloud Run service) via a pub/sub request.
+        Invokes the remote framework CLI (a Cloud Run service) via HTTP request.
+        To use Pub/Sub instead, uncomment the Pub/Sub section and comment out the HTTP section.
         """
-        # Get the remote cli url
-        topic_name = self.get_remote_cli_topic_name()
-        topic_path = self._pubsub_publisher_client.topic_path(self._project_id, topic_name)
-
+        # ============================================================================
+        # HTTP-BASED INVOCATION (ACTIVE)
+        # ============================================================================
         try:
-            self._pubsub_publisher_client.get_topic(topic=topic_path)
+            # Get the Cloud Run service URL
+            service_url = self.get_remote_cli_http_endpoint()
+            
+            # Get cached or fresh ID token
+            id_token_value = self._get_id_token(service_url)
+            
+            # Prepare headers with authentication
+            headers = {
+                "Authorization": f"Bearer {id_token_value}",
+                "Content-Type": "application/json",
+            }
+            
+            # Make HTTP POST request
+            response = requests.post(
+                service_url,
+                headers=headers,
+                json=payload,
+                timeout=300  # 5 minute timeout
+            )
+            
+            # Check response
+            response.raise_for_status()
+            logger.info("Successfully invoked remote CLI via HTTP. Status: %s", response.status_code)
+            
+        except requests.exceptions.RequestException as e:
+            logger.error("HTTP invocation failed: %s", e)
+            raise RuntimeError(f"Failed to invoke remote CLI via HTTP: {e}") from e
+        except Exception as e:
+            logger.error("Failed to get auth token or service URL: %s", e)
+            raise RuntimeError(f"Failed to invoke remote CLI: {e}") from e
 
-            message_data = json.dumps(payload).encode("utf-8")
-            result = self._pubsub_publisher_client.publish(topic_path, message_data)
-
-            message_id = result.result()
-            logger.info("Successfully invoked remote CLI. Message id: %s", message_id)
-
-        except google_api_exceptions.NotFound as e:
-            raise RuntimeError(f"Topic {topic_name} not found: e") from e
-        except google_api_exceptions.GoogleAPICallError as e:
-            logger.error("Pub/Sub invocation failed: %s", e)
+        # ============================================================================
+        # PUB/SUB-BASED INVOCATION (COMMENTED OUT)
+        # ============================================================================
+        # # Get the remote cli url
+        # topic_name = self.get_remote_cli_topic_name()
+        # topic_path = self._pubsub_publisher_client.topic_path(self._project_id, topic_name)
+        #
+        # try:
+        #     self._pubsub_publisher_client.get_topic(topic=topic_path)
+        #
+        #     message_data = json.dumps(payload).encode("utf-8")
+        #     result = self._pubsub_publisher_client.publish(topic_path, message_data)
+        #
+        #     message_id = result.result()
+        #     logger.info("Successfully invoked remote CLI. Message id: %s", message_id)
+        #
+        # except google_api_exceptions.NotFound as e:
+        #     raise RuntimeError(f"Topic {topic_name} not found: e") from e
+        # except google_api_exceptions.GoogleAPICallError as e:
+        #     logger.error("Pub/Sub invocation failed: %s", e)
 
     def event_bridge_permission_exists(self, lambda_function_name: str, statement_id: str) -> bool:
         # This method should not be reached, but it is here to satisfy the interface.

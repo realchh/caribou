@@ -370,6 +370,12 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         else:
             max_size = MAX_TRANSFER_SIZE
 
+        # log_message = (
+        #     f"DEBUG_MESSAGE: PAYLOAD_SIZE "
+        #     f"({payload_size_byte / (1024 ** 3)}) GB "
+        #     f"PAYLOAD_SIZE_BYTE ({payload_size_byte}) Bytes"
+        # )
+        # self.log_for_retrieval(log_message, workflow_placement_decision["run_id"])
         if payload_size_byte > max_size:
             log_message = (
                 f"DEBUG_MESSAGE: PAYLOAD_SIZE "
@@ -1402,11 +1408,14 @@ class CaribouWorkflow:  # pylint: disable=too-many-instance-attributes
         ):
             size_of_input_payload_gb = len(argument_raw["data"].encode("utf-8")) / (1024**3) if entry_point else -1.0
             base64_data = argument_raw["data"]
+            # print(f"base64_data = {base64_data}")
             decoded_data = base64.b64decode(base64_data)
             # if data is compressed, decode from base64 and then decompress it. otherwise, parse json. also change
             # caribou/common/models/remote_client/gcp_remote_client.py:870
             # json_string = decompress_json_str(decoded_data)
+            # print(f"decoded_data = {decoded_data}")
             json_string = decoded_data.decode("utf-8")
+            # print(f"json_string = {json_string}")
             decoded_json = json.loads(json_string)
             if "payload" in decoded_json or "workflow_placement_decision" in decoded_json:
                 caribou_wrapper_argument = decoded_json

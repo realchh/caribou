@@ -31,6 +31,9 @@ SYNC_PREDECESSOR_COUNTER_TABLE = "sync_predecessor_counter_table"
 # Image names
 CARIBOU_WORKFLOW_IMAGES_TABLE = "caribou_workflow_images_table"
 
+# HTTP Endpoints for functions (used for HTTP-based invocation)
+CARIBOU_FUNCTION_ENDPOINTS_TABLE = "caribou_function_endpoints_table"
+
 # Global System Region
 GLOBAL_SYSTEM_REGION = "us-west-2"
 GLOBAL_GCP_SYSTEM_REGION = "us-east1"

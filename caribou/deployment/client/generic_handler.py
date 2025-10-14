@@ -13,6 +13,7 @@ def _parse_event(event: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Parse and normalize the event data."""
     if isinstance(event, str):
         try:
+            # print(f"Parsing event string: {event}")
             return json.loads(event)
         except json.JSONDecodeError:
             return {"payload": event}
@@ -57,6 +58,12 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     }
     """
     try:
+        # Check if event is a Flask Request object (for HTTP invocations)
+        if hasattr(event, 'get_json'):
+            # This is an HTTP request from Cloud Run
+            # print("HTTP request detected")
+            event = event.get_json()
+            # print(f"Request JSON: {event}")
         if "Records" in event and len(event["Records"]) == 1 and "Sns" in event["Records"][0]:
             # Handle SNS-triggered invocations
             sns_message = event["Records"][0]["Sns"]["Message"]
@@ -64,10 +71,17 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         elif "@type" in event and event["@type"] == "type.googleapis.com/google.pubsub.v1.PubsubMessage":
             # Handle Pub/Sub-triggered invocations
             data = base64.b64decode(event["data"]).decode("utf-8")
+            # print(f"event before decoding {event}")
             event = _parse_event(data)
+            # print(f"event after decoding {event}")
         else:
             # Handle direct invocations
+            # print(f"Direct invocation event:")
+            # print(f"Event type: {type(event)}")
+            # print(f"Event keys: {event.keys() if isinstance(event, dict) else 'N/A'}")
+            # print(f"Event content: {event}")
             event = _parse_event(event)
+            # print(f"Parsed event: {event}")
 
         # Import and get workflow
         app = importlib.import_module("app")
@@ -86,3 +100,39 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     except (ValueError, json.JSONDecodeError, ImportError) as e:
         logger.error("Error in generic handler: %s", str(e), exc_info=True)
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+
+
+def http_handler(request):
+    """
+    HTTP handler for Cloud Functions with --signature-type http.
+    Wraps the Flask Request object and calls the lambda_handler.
+    """
+    try:
+        # Extract JSON data from the request
+        request_json = request.get_json(silent=True)
+        
+        if request_json is None:
+            # Try to get data as text
+            request_data = request.get_data(as_text=True)
+            print(f"Request data as text: {request_data}")
+            if request_data:
+                try:
+                    request_json = json.loads(request_data)
+                except json.JSONDecodeError:
+                    request_json = {"payload": request_data}
+            else:
+                request_json = {}
+        
+        print(f"HTTP handler received: {request_json}")
+        
+        # Call the lambda_handler with the parsed JSON
+        result = lambda_handler(request_json, None)
+        
+        # Return the response
+        if isinstance(result, dict) and "body" in result:
+            return result["body"], result.get("statusCode", 200)
+        return json.dumps(result), 200
+        
+    except Exception as e:
+        logger.error("Error in HTTP handler: %s", str(e), exc_info=True)
+        return json.dumps({"error": str(e)}), 500
