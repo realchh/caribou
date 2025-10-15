@@ -5,9 +5,9 @@ import sys
 import caribou.endpoint.client as client
 
 # --- Configuration ---
-WORKFLOW_ID = "pubsub_testing-0.0.3"
-ARGUMENT_PAYLOAD = '{"message_size": "small"}'
-INTERVAL_SECONDS = 0.2
+WORKFLOW_ID = "pubsub_testing-0.0.4"
+ARGUMENT_PAYLOAD = '{"message_size": "large"}'
+INTERVAL_SECONDS = 10
 max_counter = 250
 RUN_DURATION_MINUTES = max_counter * INTERVAL_SECONDS / 60
 # -------------------
@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     counter = 0
 
-    with open('3_gcp_pubsub_small_5_rps.txt', 'a') as f:
+    with open('http_gcp_pubsub_large_0_1_rps.txt', 'a') as f:
         while counter < max_counter:
             f.write(f"--- {time.ctime()} ---")
             f.write(f"Executing command: {ARGUMENT_PAYLOAD}")
